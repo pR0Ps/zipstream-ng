@@ -35,4 +35,7 @@ setup(
         "console_scripts": ["zipserver=zipstream.server:main"]
     },
     python_requires=">=3.7.0",
+    extras_require={
+        "tests": ["pytest", "pytest-cov"],
+    },
 )
