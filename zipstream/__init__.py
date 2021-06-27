@@ -94,7 +94,7 @@ class ZipStreamInfo(ZipInfo):
         # streamable
         return struct.pack(
             b'<4sLQQ' if zip64 else b'<4sLLL',
-            b'PK\x07\x08',  # Data descriptor header
+            b'PK\x07\x08',  # Data descriptor signature
             self.CRC,
             self.compress_size,
             self.file_size
@@ -105,7 +105,7 @@ class ZipStreamInfo(ZipInfo):
         data for it.
 
         If `force_zip64` is True (not default), then zip64 extensions will
-        always be used for storing files (not directories)
+        always be used for storing files (not directories).
         """
         # Based on the code in zipfile.ZipFile.write, zipfile._ZipWriteFile.{write,close}
 
@@ -375,7 +375,7 @@ class ZipStream(object):
         return b''.join(self)
 
     def file(self):
-        """Generate data for a single file contained in the ZipStream
+        """Generate data for a single file being added to the ZipStream
 
         Yields the stored data for a single file.
         Returns True if a file was available, False otherwise.
@@ -390,8 +390,8 @@ class ZipStream(object):
 
         # Since generating the file entry depends on the current number of bytes
         # generated, calling this function again without exhausing the generator
-        # first will cause corrupted streams. Prevent this by adding a
-        # lock around the functions that actually generate data.
+        # first will cause corrupted streams. Prevent this by adding a lock
+        # around the functions that actually generate data.
         with self._gen_lock:
             yield from self._gen_file_entry(**kwargs)
         return True
@@ -446,6 +446,7 @@ class ZipStream(object):
         If given, `compress_type` and `compress_level` override the settings the
         ZipStream was initialized with.
 
+        Raises a ValueError if the path does not exist.
         Raises a RuntimeError if the ZipStream has already been finalized.
         """
         path = os.path.normpath(path)
@@ -843,10 +844,10 @@ class ZipStream(object):
             # Record the current progress for next time
             self._size_prog = (num_files, files_size, cdfh_size)
 
-        # Calculate the amount of data the end of central directory needs.
-        # This is computed every time since it depends on the other metrics.
-        # Also, it means that we don't have to deal with detecting when the
-        # comment changes.
+        # Calculate the amount of data the end of central directory needs. This
+        # is computed every time since it depends on the other metrics.  Also,
+        # it means that we don't have to deal with detecting if the comment
+        # changes.
         eocd_size = sizeEndCentDir + len(self._comment)  # 22 + comment len
         if (
             num_files > ZIP_FILECOUNT_LIMIT or
