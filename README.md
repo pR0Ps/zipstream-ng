@@ -21,7 +21,7 @@ Other features:
 Installation
 ------------
 ```
-pip install git+https://github.com/pR0Ps/zipstream-ng
+pip install zipstream-ng
 ```
 
 
