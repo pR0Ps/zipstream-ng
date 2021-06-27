@@ -7,7 +7,6 @@ import json
 import logging
 import os
 import random
-import threading
 import time
 import zipfile
 import zlib
@@ -32,7 +31,7 @@ def files(tmp_path_factory):
     paths = []
     for f in FILES:
         path = d / f[0]
-        data = random.randbytes(f[1])
+        data = _randbytes(f[1])
         hash_ = hashlib.md5(data).hexdigest()
         crc32 = zlib.crc32(data) & 0xFFFFFFFF
 
@@ -45,6 +44,12 @@ def files(tmp_path_factory):
 ################################
 # Test helpers
 ################################
+
+def _randbytes(n):
+    # Backported from Python 3.9
+    if not n:
+        return b''
+    return random.getrandbits(n * 8).to_bytes(n, 'little')
 
 def _get_zip(data):
     if not isinstance(data, io.IOBase):
@@ -81,7 +86,7 @@ def _assert_equal_zips(z1, z2):
 
 def _gen_rand():
     for x in range(10):
-        yield random.randbytes(1024)
+        yield _randbytes(1024)
 
 
 ################################
@@ -372,6 +377,9 @@ def test_directory_links_without_infinite_recursion(tmpdir):
     infinite recursion"""
 
     t = tmpdir.mkdir("top")
+    if not hasattr(t, "mksymlinkto"):
+        pytest.skip("mksymlinkto not supported - can't test infinite recursion")
+
     o = tmpdir.mkdir("other")
     o.join("validfile").write("this is valid")
     b = t.mkdir("mid").mkdir("bottom")
@@ -655,14 +663,17 @@ def test_readme_stdlib_comparison(tmpdir):
     t.join("test.txt").write('test')
     f = t.mkdir("filled")
     f.join("file.bin").write_binary(b'\x00\x01\xFF')
-    f.join("file2.bin").mksymlinkto('file.bin')
 
-    o = tmpdir.mkdir("othertop")
-    o.join("other.txt").write('other')
-    f.join("notevil").mksymlinkto('../../othertop')
+    # Can't make symlinks on some platforms
+    if hasattr(t, "mksymlinkto"):
+        f.join("file2.bin").mksymlinkto('file.bin')
 
-    # TODO: make stdlib version handle infinte loops
-    #f.join("evil").mksymlinkto('../')
+        o = tmpdir.mkdir("othertop")
+        o.join("other.txt").write('other')
+        f.join("notevil").mksymlinkto('../../othertop')
+
+        # TODO: make stdlib version handle infinte loops
+        #f.join("evil").mksymlinkto('../')
 
     _assert_equal_zips(
         _get_zip(generate_zipstream(t)),
@@ -780,92 +791,8 @@ def test_sized_zipstream_size_while_adding(monkeypatch, files, zip64):
         _verify_zip_contains(zf, f)
 
 
-def test_multiple_threads(monkeypatch, files):
-    """Test adding and generating files is threadsafe"""
-    # Will spin up 1 thread per file to add data, then another thread per file
-    # to each generate a single file and add the data to a shared object. When
-    # threads generate data at the same time, it gets intermixed and creates a
-    # corrupted zip file. To verify this, uncomment the monkeypatch below.
-
-    zs = ZipStream()
-
-    # With this line uncommented, the test fails _most_ of the time
-    #monkeypatch.setattr(zs, "_gen_lock", threading.Semaphore(99999))
-
-    data = bytearray()
-
-    def add(path):
-        zs.add_path(path)
-
-    def gather(d):
-        d += b''.join(zs.file())
-
-    # add data
-    threads = [threading.Thread(target=add, args=(f[0],)) for f in files]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-
-    # gather data
-    threads = [threading.Thread(target=gather, args=(data,)) for _ in files]
-    for t in threads:
-        t.start()
-    for t in threads:
-        t.join()
-
-    data += b''.join(zs.footer())
-
-    zf = _get_zip(data)
-    assert len(zf.infolist()) == len(files)
-
-    for f in files:
-        _verify_zip_contains(zf, f)
-
-
-def test_multiple_threads_getting_size(monkeypatch, files):
-    """Test getting the size is threadsafe"""
-    # 5 threads will repeatedly get the size of the ZipStream as content is
-    # added to it. Since the size is calculated iteratively and cached,
-    # multithreading can cause issues. To verify this, uncomment the monkeypatch
-    # below.
-
-    szs = ZipStream(sized=True)
-
-    # With this line uncommented, the test fails _most_ of the time
-    #monkeypatch.setattr(szs, "_size_lock", threading.Semaphore(99999))
-
-    sizes = [0]   # using a list as a hack for a mutable int
-
-    def get_size():
-        t = time.time()
-        while (time.time() - t) < 0.5:
-            s = len(szs)
-            sizes[0] = s
-
-    threads = [threading.Thread(target=get_size) for _ in range(5)]
-    for t in threads:
-        t.start()
-
-    for f in files:
-        szs.add_path(f[0])
-        time.sleep(0.1)
-
-    for t in threads:
-        t.join()
-
-    data = bytes(szs)
-    assert len(szs) == sizes[0] == len(data)
-
-    zf = _get_zip(data)
-    assert len(zf.infolist()) == len(files)
-
-    for f in files:
-        _verify_zip_contains(zf, f)
-
-
 # Warning: skippped because it creates a 4GB+ temp file
-@pytest.mark.skip  
+@pytest.mark.skip
 def test_zip64_real(tmpdir):
     """Test compressing a large file using Zip64 extensions works"""
     large_file = tmpdir.join("large.bin")
@@ -875,9 +802,9 @@ def test_zip64_real(tmpdir):
     # bookended by 1MB of random data. Also generate a small file with random
     # data to test the header offset of it being over non-zip64 limits.
     datasize = 1024 * 1024
-    startdata = random.randbytes(datasize)
-    enddata = random.randbytes(datasize)
-    smalldata = random.randbytes(datasize)
+    startdata = _randbytes(datasize)
+    enddata = _randbytes(datasize)
+    smalldata = _randbytes(datasize)
 
     # Write large file
     with open(large_file, 'wb') as fp:
