@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-"A modern and easy to use streamable zip file generator"
+"""A modern and easy to use streamable zip file generator"""
 
 import collections
 import datetime
@@ -79,7 +79,7 @@ class ZipStreamInfo(ZipInfo):
         if not (MIN_DATE <= date_time <= MAX_DATE):
             __log__.warning(
                 "Date of %s is outside of the supported range for zip files"
-                "and was automcatically adjusted",
+                "and was automatically adjusted",
                 date_time
             )
             date_time = min(max(MIN_DATE, date_time), MAX_DATE)
@@ -389,7 +389,7 @@ class ZipStream(object):
             return False
 
         # Since generating the file entry depends on the current number of bytes
-        # generated, calling this function again without exhausing the generator
+        # generated, calling this function again without exhausting the generator
         # first will cause corrupted streams. Prevent this by adding a lock
         # around the functions that actually generate data.
         with self._gen_lock:
@@ -476,7 +476,7 @@ class ZipStream(object):
         visited = {_getkey(path)}
         for dirpath, dirnames, files in os.walk(path, followlinks=True):
 
-            # Prevent infinte recursion by removing previously-visited
+            # Prevent infinite recursion by removing previously-visited
             # directories from dirnames.
             for i in reversed(range(len(dirnames))):
                 k = _getkey(os.path.join(dirpath, dirnames[i]))
@@ -635,7 +635,7 @@ class ZipStream(object):
         """Convenience method that creates a ZipStream and adds the contents of
         a path to it.
 
-        The `sized` kwarg is passed to `__init__`. See it's docstring for
+        The `sized` kwarg is passed to `__init__`. See its docstring for
         details.
 
         All other args and kwargs are passed to `add_path`. See its docstring

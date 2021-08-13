@@ -682,11 +682,16 @@ def test_readme_stdlib_comparison(tmpdir):
 
 def test_add_duplicate_file():
     """Test adding multiple files with the same name works"""
-    zs = ZipStream()
+    zs = ZipStream(sized=True)
     zs.add(b"test", "test.txt")
     zs.add(b"another test", "test.txt")
 
-    zf = _get_zip(zs)
+    calculated = len(zs)
+    data = bytes(zs)
+    assert len(data) == calculated
+
+    zf = _get_zip(data)
+
     zinfos = zf.infolist()
     assert len(zinfos) == 2
 

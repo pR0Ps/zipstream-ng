@@ -1,11 +1,11 @@
 zipstream-ng
 ============
-A modern and easy to use streamable zip file generator. It can package and stream many files and
-folders on the fly without needing temporary files or excessive memory.
-
 [![Status](https://github.com/pR0Ps/zipstream-ng/workflows/tests/badge.svg)](https://github.com/pR0Ps/zipstream-ng/actions/workflows/tests.yml)
 [![Version](https://img.shields.io/pypi/v/zipstream-ng.svg)](https://pypi.org/project/zipstream-ng/)
 ![Python](https://img.shields.io/pypi/pyversions/zipstream-ng.svg)
+
+A modern and easy to use streamable zip file generator. It can package and stream many files and
+folders on the fly without needing temporary files or excessive memory.
 
 Includes the ability to calculate the total size of the stream before any data is actually added
 (provided no compression is used). This makes it ideal for use in web applications since the total
