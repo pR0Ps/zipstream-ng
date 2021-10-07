@@ -9,6 +9,7 @@ import logging
 import os
 import queue
 import struct
+import sys
 import time
 import threading
 from zipfile import (
@@ -43,12 +44,18 @@ MAX_DATE = (2107, 12, 31, 23, 59, 59)
 # be slightly bigger than uncompressed.
 ZIP64_ESTIMATE_FACTOR = 1.05
 
+# Run in 3.6-compatible mode (disables compression levels)
+PY36_COMPAT = sys.version_info < (3, 7)
+
 
 __log__ = logging.getLogger(__name__)
 
 
 def _check_compression(compress_type, compress_level):
     """Check the specified compression type and level are valid"""
+
+    if PY36_COMPAT and compress_level is not None:
+        raise ValueError("compress_level is not supported on Python <3.7")
 
     _check_compress_type(compress_type)
 
@@ -136,7 +143,10 @@ class ZipStreamInfo(ZipInfo):
         yield self.FileHeader(zip64)
 
         # Store/compress the data while keeping track of size and CRC
-        cmpr = _get_compressor(self.compress_type, self._compresslevel)
+        if not PY36_COMPAT:
+            cmpr = _get_compressor(self.compress_type, self._compresslevel)
+        else:
+            cmpr = _get_compressor(self.compress_type)
         crc = 0
         file_size = 0
         compress_size = 0
@@ -314,6 +324,9 @@ class ZipStream(object):
             more information). When using ZIP_BZIP2 integers 1 through 9 are
             accepted (see bz2 for more information). Raises a ValueError if the
             provided value isn't valid for the `compress_type`.
+
+            Only available in Python 3.7+ (raises a ValueError if used on a
+            lower version)
 
         sized:
             If `True`, will make the ZipStream able to calculate its final size
@@ -624,7 +637,7 @@ class ZipStream(object):
                 "datetime": datetime.datetime(*x.date_time).isoformat(),
                 "CRC": x.CRC,
                 "compress_type": x.compress_type,
-                "compress_level": x._compresslevel,
+                "compress_level": getattr(x, "_compresslevel", None),  # <3.7 compat
                 "extract_version": x.extract_version,
             }
             for x in self._filelist
@@ -693,7 +706,8 @@ class ZipStream(object):
                 zinfo.file_size = len(data)
 
         zinfo.compress_type = compress_type if compress_type is not None else self._compress_type
-        zinfo._compresslevel = compress_level if compress_level is not None else self._compress_level
+        if not PY36_COMPAT:
+            zinfo._compresslevel = compress_level if compress_level is not None else self._compress_level
 
         # Store the position of the header
         zinfo.header_offset = self._pos
