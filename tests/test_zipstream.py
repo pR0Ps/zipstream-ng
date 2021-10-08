@@ -19,6 +19,7 @@ from zipstream import ZipStream
 
 
 PY36 = sys.version_info < (3, 7)
+PY35 = sys.version_info < (3, 6)
 
 FILES = [
     ("empty", 0),
@@ -26,6 +27,16 @@ FILES = [
     ("kbyte", 1024),
     ("mbyte", 1024 * 1024),
 ]
+
+
+# Patch is_dir onto ZipInfo objects in 3.5 to make testing easier
+@pytest.fixture(autouse=PY35)
+def add_is_dir(monkeypatch):
+    monkeypatch.setattr(
+        zipfile.ZipInfo, "is_dir",
+        zipstream.ZipStreamInfo.is_dir,
+        raising=False
+    )
 
 
 @pytest.fixture(scope="session")
@@ -65,7 +76,7 @@ def _get_zip(data):
 
 def _verify_zip_contains(zfile, pathdata):
     path, hash_, crc32 = pathdata
-    path = os.path.basename(path)
+    path = os.path.basename(str(path))
     zinfo = zfile.getinfo(path)
     assert zinfo.filename == path
     assert zinfo.CRC == crc32
@@ -313,7 +324,7 @@ def test_creating_dirs_with_data():
     zinfos = _get_zip(zs).infolist()
     assert len(zinfos) == 3
     for i in range(3):
-        assert zinfos[i].filename == f"folder{i}/"
+        assert zinfos[i].filename == "folder{}/".format(i)
         assert zinfos[i].is_dir()
         assert zinfos[i].file_size == 0
         assert zinfos[i].compress_size == 0
@@ -632,6 +643,7 @@ def test_get_info(monkeypatch):
     assert len(zinfos) == 4
 
 
+@pytest.mark.skipif(PY35, reason="Requires zipfiles to support unseekable streams (Python 3.6+ only)")
 def test_readme_stdlib_comparison(tmpdir):
     """Make sure the comparison is accurate"""
 
@@ -848,7 +860,7 @@ def test_zip64_real(tmpdir):
     smalldata = _randbytes(datasize)
 
     # Write large file
-    with open(large_file, 'wb') as fp:
+    with open(str(large_file), 'wb') as fp:
         fp.write(startdata)
         fp.seek(zipfile.ZIP64_LIMIT, io.SEEK_CUR)
         fp.write(enddata)
@@ -857,10 +869,10 @@ def test_zip64_real(tmpdir):
     zs = ZipStream()
     zs.add_path(large_file)
     zs.add(smalldata, "small.bin")
-    with open(zip_file, 'wb') as fp:
+    with open(str(zip_file), 'wb') as fp:
         fp.writelines(zs)
 
-    with zipfile.ZipFile(zip_file, 'r') as zf:
+    with zipfile.ZipFile(str(zip_file), 'r') as zf:
         zinfos = zf.infolist()
         assert len(zinfos) == 2
 

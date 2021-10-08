@@ -8,6 +8,7 @@ import functools
 import logging
 import os
 import queue
+import stat
 import struct
 import sys
 import time
@@ -44,8 +45,9 @@ MAX_DATE = (2107, 12, 31, 23, 59, 59)
 # be slightly bigger than uncompressed.
 ZIP64_ESTIMATE_FACTOR = 1.05
 
-# Run in 3.6-compatible mode (disables compression levels)
-PY36_COMPAT = sys.version_info < (3, 7)
+# Constants for compatibility modes
+PY36_COMPAT = sys.version_info < (3, 7)  # disable compress_level
+PY35_COMPAT = sys.version_info < (3, 6)  # backport ZipInfo functions, stringify path-like objects
 
 
 __log__ = logging.getLogger(__name__)
@@ -252,6 +254,43 @@ class ZipStreamInfo(ZipInfo):
         yield filename
         yield extra_data
         yield self.comment
+
+    if PY35_COMPAT:  # pragma: no cover
+        # Backport essential functions introduced in 3.6
+
+        @classmethod
+        def from_file(cls, filename, arcname=None):
+            """Construct an appropriate ZipInfo for a file on the filesystem.
+            filename should be the path to a file or directory on the filesystem.
+            arcname is the name which it will have within the archive (by default,
+            this will be the same as filename, but without a drive letter and with
+            leading path separators removed).
+            """
+            st = os.stat(filename)
+            isdir = stat.S_ISDIR(st.st_mode)
+            mtime = time.localtime(st.st_mtime)
+            date_time = mtime[0:6]
+            # Create ZipInfo instance to store file information
+            if arcname is None:
+                arcname = filename
+            arcname = os.path.normpath(os.path.splitdrive(arcname)[1])
+            while arcname[0] in (os.sep, os.altsep):
+                arcname = arcname[1:]
+            if isdir:
+                arcname += '/'
+            zinfo = cls(arcname, date_time)
+            zinfo.external_attr = (st.st_mode & 0xFFFF) << 16  # Unix attributes
+            if isdir:
+                zinfo.file_size = 0
+                zinfo.external_attr |= 0x10  # MS-DOS directory flag
+            else:
+                zinfo.file_size = st.st_size
+
+            return zinfo
+
+        def is_dir(self):
+            """Return True if this archive member is a directory."""
+            return self.filename[-1] == '/'
 
 
 def _validate_final(func):
@@ -462,13 +501,17 @@ class ZipStream(object):
         Raises a ValueError if the path does not exist.
         Raises a RuntimeError if the ZipStream has already been finalized.
         """
+        # Resolve path objects to strings on Python 3.5
+        if PY35_COMPAT and hasattr(path, "__fspath__"):  # pragma no cover
+            path = path.__fspath__()
+
         path = os.path.normpath(path)
 
         if not arcname:
             arcname = os.path.basename(path)
 
         if not os.path.exists(path):
-            raise ValueError(f"Path '{path}' not found")
+            raise ValueError("Path '{}' not found".format(path))
 
         # Not recursing - just add the path
         if not recurse or not os.path.isdir(path):
