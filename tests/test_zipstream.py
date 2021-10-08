@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import random
+import sys
 import time
 import zipfile
 import zlib
@@ -17,12 +18,25 @@ import zipstream
 from zipstream import ZipStream
 
 
+PY36 = sys.version_info < (3, 7)
+PY35 = sys.version_info < (3, 6)
+
 FILES = [
     ("empty", 0),
     ("byte", 1),
     ("kbyte", 1024),
     ("mbyte", 1024 * 1024),
 ]
+
+
+# Patch is_dir onto ZipInfo objects in 3.5 to make testing easier
+@pytest.fixture(autouse=PY35)
+def add_is_dir(monkeypatch):
+    monkeypatch.setattr(
+        zipfile.ZipInfo, "is_dir",
+        zipstream.ZipStreamInfo.is_dir,
+        raising=False
+    )
 
 
 @pytest.fixture(scope="session")
@@ -62,7 +76,7 @@ def _get_zip(data):
 
 def _verify_zip_contains(zfile, pathdata):
     path, hash_, crc32 = pathdata
-    path = os.path.basename(path)
+    path = os.path.basename(str(path))
     zinfo = zfile.getinfo(path)
     assert zinfo.filename == path
     assert zinfo.CRC == crc32
@@ -225,6 +239,38 @@ def test_footer_partial(files):
     zipfile.ZIP_STORED,
     zipfile.ZIP_LZMA
 ])
+def test_compress_level_python_36(monkeypatch, ct):
+    """Test that using compress_level on <3.7 produces an error"""
+
+    # Test that the module-level attribute is set correctly
+    assert zipstream.PY36_COMPAT == PY36
+
+    # Patch it to let the test work on all versions
+    monkeypatch.setattr(zipstream, "PY36_COMPAT", True)
+
+    with pytest.raises(ValueError, match="compress_level is not supported"):
+        ZipStream(compress_type=ct, compress_level=1)
+
+    zs = ZipStream(compress_type=ct)
+    with pytest.raises(ValueError, match="compress_level is not supported"):
+        zs.add_path(".", compress_level=1)
+    with pytest.raises(ValueError, match="compress_level is not supported"):
+        zs.add("data", "data.bin", compress_level=1)
+
+    # Test that basic compression still works
+    zs.add(b"moredata", "data.bin")
+    zf = _get_zip(zs)
+    zinfos = zf.infolist()
+    assert len(zinfos) == 1
+    assert zinfos[0].filename == "data.bin"
+    assert zf.read(zinfos[0]) == b"moredata"
+
+
+@pytest.mark.skipif(PY36, reason="Tests compress_level (Python 3.7+ only)")
+@pytest.mark.parametrize("ct", [
+    zipfile.ZIP_STORED,
+    zipfile.ZIP_LZMA
+])
 def test_non_effective_compression_warn(caplog, ct):
     """Test warning for non-effective compression level settings"""
     caplog.set_level(logging.WARNING)
@@ -236,6 +282,7 @@ def test_non_effective_compression_warn(caplog, ct):
     assert "no effect" in caplog.text
 
 
+@pytest.mark.skipif(PY36, reason="Tests compress_level (Python 3.7+ only)")
 @pytest.mark.parametrize("ct", [
     zipfile.ZIP_DEFLATED,
     zipfile.ZIP_BZIP2
@@ -277,7 +324,7 @@ def test_creating_dirs_with_data():
     zinfos = _get_zip(zs).infolist()
     assert len(zinfos) == 3
     for i in range(3):
-        assert zinfos[i].filename == f"folder{i}/"
+        assert zinfos[i].filename == "folder{}/".format(i)
         assert zinfos[i].is_dir()
         assert zinfos[i].file_size == 0
         assert zinfos[i].compress_size == 0
@@ -546,7 +593,7 @@ def test_get_info(monkeypatch):
     data = bytearray()
     zs = ZipStream(compress_type=zipfile.ZIP_STORED)
     zs.add(None, "empty/", compress_type=zipfile.ZIP_DEFLATED)
-    zs.add(b"test", "text.txt", compress_type=zipfile.ZIP_BZIP2, compress_level=5)
+    zs.add(b"test", "text.txt", compress_type=zipfile.ZIP_BZIP2, compress_level=5 if not PY36 else None)
     zs.add(b"test", "text2.txt")
     assert zs.num_queued() == 3
     assert len(zs.get_info()) == 0
@@ -572,7 +619,7 @@ def test_get_info(monkeypatch):
         "datetime": "1980-01-01T00:00:00",
         "CRC": 3632233996,
         "compress_type": zipfile.ZIP_BZIP2,
-        "compress_level": 5,
+        "compress_level": 5 if not PY36 else None,
         "extract_version": zipfile.BZIP2_VERSION
     }
     assert info[2] == {
@@ -596,6 +643,7 @@ def test_get_info(monkeypatch):
     assert len(zinfos) == 4
 
 
+@pytest.mark.skipif(PY35, reason="Requires zipfiles to support unseekable streams (Python 3.6+ only)")
 def test_readme_stdlib_comparison(tmpdir):
     """Make sure the comparison is accurate"""
 
@@ -725,7 +773,7 @@ def test_sized_zipstream(monkeypatch, files, zip64):
     szs.add(None, "a_dir/", compress_type=zipfile.ZIP_STORED)
     szs.add(_gen_rand(), "random.txt", compress_type=None)
     szs.add(b"data", "data.bin", compress_level=None)
-    szs.add("text", "data.text", compress_level=10)
+    szs.add("text", "data.text", compress_level=10 if not PY36 else None)
 
     # Specifying any actual compression raises errors
     with pytest.raises(ValueError):
@@ -812,7 +860,7 @@ def test_zip64_real(tmpdir):
     smalldata = _randbytes(datasize)
 
     # Write large file
-    with open(large_file, 'wb') as fp:
+    with open(str(large_file), 'wb') as fp:
         fp.write(startdata)
         fp.seek(zipfile.ZIP64_LIMIT, io.SEEK_CUR)
         fp.write(enddata)
@@ -821,17 +869,25 @@ def test_zip64_real(tmpdir):
     zs = ZipStream()
     zs.add_path(large_file)
     zs.add(smalldata, "small.bin")
-    with open(zip_file, 'wb') as fp:
+    with open(str(zip_file), 'wb') as fp:
         fp.writelines(zs)
 
-    with zipfile.ZipFile(zip_file, 'r') as zf:
+    with zipfile.ZipFile(str(zip_file), 'r') as zf:
         zinfos = zf.infolist()
         assert len(zinfos) == 2
 
         # Read the data and make sure it's the same as what was put in
         with zf.open("large.bin", 'r') as fp:
             assert startdata == fp.read(datasize)
-            fp.seek(zipfile.ZIP64_LIMIT, io.SEEK_CUR)
+            if PY36:
+                # No support for seeking <3.7 - read it all in 128MB chunks
+                per = 1024 * 1024 * 128
+                rem = zipfile.ZIP64_LIMIT % per
+                for _ in range(zipfile.ZIP64_LIMIT // per):
+                    fp.read(per)
+                fp.read(rem)
+            else:
+                fp.seek(zipfile.ZIP64_LIMIT, io.SEEK_CUR)
             assert enddata == fp.read()
 
         with zf.open("small.bin", 'r') as fp:

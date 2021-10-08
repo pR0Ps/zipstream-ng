@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 
-import contextlib
 from setuptools import setup
 import os.path
 
@@ -23,9 +22,12 @@ setup(
     licence="LGPLv3",
     classifiers=[
         "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.5",
+        "Programming Language :: Python :: 3.6",
         "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10",
         "Operating System :: OS Independent",
         "Topic :: System :: Archiving :: Compression",
         "License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)"
@@ -34,7 +36,7 @@ setup(
     entry_points={
         "console_scripts": ["zipserver=zipstream.server:main"]
     },
-    python_requires=">=3.7.0",
+    python_requires=">=3.5.0",
     extras_require={
         "tests": ["pytest", "pytest-cov"],
     },
