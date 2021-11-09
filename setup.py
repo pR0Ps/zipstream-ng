@@ -14,12 +14,12 @@ except Exception:
 
 setup(
     name="zipstream-ng",
-    version="1.1.0",
+    version="1.2.0",
     description="A modern and easy to use streamable zip file generator",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/pR0Ps/zipstream-ng",
-    licence="LGPLv3",
+    license="LGPLv3",
     classifiers=[
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.5",
