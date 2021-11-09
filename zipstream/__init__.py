@@ -692,17 +692,26 @@ class ZipStream(object):
         ]
 
     @classmethod
-    def from_path(cls, path, *, sized=False, **kwargs):
+    def from_path(cls, path, *, compress_type=ZIP_STORED, compress_level=None, sized=None, **kwargs):
         """Convenience method that creates a ZipStream and adds the contents of
         a path to it.
 
-        The `sized` kwarg is passed to `__init__`. See its docstring for
-        details.
+        `sized` defaults to `True` if no compression is used, `False`
+        otherwise. All other parameter defaults are the same as those in
+        `__init__` and `add_path`.
 
-        All other args and kwargs are passed to `add_path`. See its docstring
-        for details.
+        The `compress_type`, `compress_level`, and `sized` parameters will be
+        passed to `__init__`, all other args and kwargs are passed to
+        `add_path`.
         """
-        z = cls(sized=sized)
+        if sized is None:
+            sized = compress_type == ZIP_STORED
+
+        z = cls(
+            compress_type=compress_type,
+            compress_level=compress_level,
+            sized=sized
+        )
         z.add_path(path, **kwargs)
         return z
 

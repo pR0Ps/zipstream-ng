@@ -117,7 +117,7 @@ app = Flask(__name__)
 @app.route('/<path:path>', methods=['GET'])
 def stream_zip(path):
     name = os.path.basename(os.path.normpath(path))
-    zs = ZipStream.from_path(path, sized=True)
+    zs = ZipStream.from_path(path)
     return Response(
         zs,
         mimetype="application/zip",
