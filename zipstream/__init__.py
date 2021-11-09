@@ -620,6 +620,11 @@ class ZipStream(object):
             )
 
     @property
+    def sized(self):
+        """True if the ZipStream's final size is known"""
+        return self._sized
+
+    @property
     def comment(self):
         """The comment associated with the the ZipStream"""
         return self._comment

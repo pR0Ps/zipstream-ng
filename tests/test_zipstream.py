@@ -747,6 +747,15 @@ def test_add_duplicate_file():
     assert zf.read(zinfos[1]) == b"another test"
 
 
+def test_unsized_zipstream_len_typeerror():
+    """Test that an unsized ZipStream raises a TypeError when aske for the length"""
+    zs = ZipStream(sized=False)
+    assert not zs.sized
+
+    with pytest.raises(TypeError):
+        len(ZipStream(sized=False))
+
+
 @pytest.mark.parametrize("zip64", [False, True])
 def test_sized_zipstream(monkeypatch, files, zip64):
     """Test a sized ZipStream accurately calculates its final size"""
@@ -783,6 +792,7 @@ def test_sized_zipstream(monkeypatch, files, zip64):
     with pytest.raises(ValueError):
         szs.add("invalid", "invalid", compress_type=zipfile.ZIP_BZIP2)
 
+    assert szs.sized
     calculated = len(szs)
 
     data = bytes(szs)
