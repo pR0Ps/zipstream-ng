@@ -860,7 +860,7 @@ class ZipStream(object):
             # These 3 metrics need to be tracked separately since the decision to
             # add a zip64 header on the end of the stream depends on any of these
             # exceeding a limit.
-            num_files, cdfh_size, files_size, = self._size_prog
+            (num_files, files_size, cdfh_size) = self._size_prog
 
             while True:
                 try:
