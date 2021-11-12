@@ -542,15 +542,20 @@ class ZipStream(object):
                     visited.add(k)
 
             # Preserve empty directories
-            if not files:
+            if not files and not dirnames:
                 files = [""]
 
             for f in files:
                 filepath=os.path.join(dirpath, f)
+                name = os.path.relpath(filepath, path)
+                if not f:
+                    # adding an empty directory - make sure it has a trailing slash
+                    name += os.sep
+
                 self._enqueue(
                     path=filepath,
                     # Use the arcname as the base path for the files
-                    arcname=os.path.join(arcname, os.path.relpath(filepath, path)),
+                    arcname=os.path.join(arcname, name),
                     compress_type=compress_type,
                     compress_level=compress_level
                 )

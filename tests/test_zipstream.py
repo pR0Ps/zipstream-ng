@@ -336,7 +336,12 @@ def test_empty_folders_preserved_recursive(tmpdir):
     t.mkdir("empty")
     t.join("file.txt").write(b'')
 
-    zinfos = sorted(_get_zip(ZipStream.from_path(t)).infolist(), key=lambda x: x.filename)
+    zs = ZipStream.from_path(t)
+
+    data = bytes(zs)
+    assert len(data) == len(zs)
+
+    zinfos = sorted(_get_zip(data).infolist(), key=lambda x: x.filename)
 
     assert len(zinfos) == 2
     assert zinfos[0].filename == "top/empty/"
@@ -436,14 +441,15 @@ def test_directory_links_without_infinite_recursion(tmpdir):
     b.join("notevil").mksymlinkto("../../../other")
 
     pathnames = (
-        "top/",
-        "top/mid/",
-        "top/mid/bottom/",
         "top/mid/bottom/evil/",
         "top/mid/bottom/notevil/validfile"
     )
 
-    zinfos = sorted(_get_zip(ZipStream.from_path(t)).infolist(), key=lambda x: x.filename)
+    zs = ZipStream.from_path(t)
+    data = bytes(zs)
+    assert len(data) == len(zs)
+
+    zinfos = sorted(_get_zip(data).infolist(), key=lambda x: x.filename)
     assert len(zinfos) == len(pathnames)
     for x, n in zip(zinfos, pathnames):
         assert x.filename == n
@@ -455,6 +461,7 @@ def test_directory_links_without_infinite_recursion(tmpdir):
             assert x.is_dir()
             assert x.file_size == 0
             assert x.compress_size == 0
+
 
 def test_adding_missing_path(tmpdir):
     with pytest.raises(ValueError):
@@ -876,11 +883,19 @@ def test_zip64_real(tmpdir):
         fp.write(enddata)
 
     # Write as a stream to a zip file
-    zs = ZipStream()
+    zs = ZipStream(sized=True)
     zs.add_path(large_file)
     zs.add(smalldata, "small.bin")
+
+    calculated = len(zs)
+
+    l = 0
     with open(str(zip_file), 'wb') as fp:
-        fp.writelines(zs)
+        for chunk in zs:
+            l += len(chunk)
+            fp.write(chunk)
+
+    assert l == calculated
 
     with zipfile.ZipFile(str(zip_file), 'r') as zf:
         zinfos = zf.infolist()
