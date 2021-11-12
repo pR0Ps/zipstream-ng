@@ -149,6 +149,7 @@ class ZippingHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Content-Type", "application/zip")
         self.send_header("Content-Disposition", "attachment; filename=files.zip")
         self.send_header("Content-Length", len(zs))
+        self.send_header("Last-Modified", zs.last_modified)
         self.end_headers()
 
         # Generate the data of the ZipStream as it's sent to the client

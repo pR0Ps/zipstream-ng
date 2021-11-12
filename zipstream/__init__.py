@@ -388,6 +388,7 @@ class ZipStream(object):
         self._compress_type = compress_type
         self._compress_level = compress_level
         self._comment = b""
+        self._last_modified = None
 
         # For adding files
         self._filelist = []
@@ -630,6 +631,15 @@ class ZipStream(object):
         return self._sized
 
     @property
+    def last_modified(self):
+        """Return the date of the most recently modified file in the ZipStream
+
+        Returns a `datetime.datetime` object or `None` if the ZipStream is
+        empty.
+        """
+        return datetime.datetime(*self._last_modified) if self else None
+
+    @property
     def comment(self):
         """The comment associated with the the ZipStream"""
         return self._comment
@@ -723,6 +733,14 @@ class ZipStream(object):
     def _enqueue(self, **kwargs):
         """Internal method to enqueue files, data, and iterables to be streamed"""
 
+        path = kwargs.get("path")
+
+        # Get the modified time of the added path (use current time for
+        # non-paths) and use it to update the last_modified property
+        mtime = time.localtime(os.stat(path).st_mtime if path else None)[0:6]
+        if self._last_modified is None or self._last_modified < mtime:
+            self._last_modified = mtime
+
         # If the ZipStream is sized then it will look at what is being added and
         # queue up some information for _get_size to use to compute the total
         # length of the stream. It will also read any iterables fully into
@@ -730,7 +748,6 @@ class ZipStream(object):
         if self._sized:
             iterable = kwargs.pop("iterable", None)
             data = kwargs.get("data")
-            path = kwargs.get("path")
 
             assert bool(iterable) ^ bool(data is not None) ^ bool(path)
 

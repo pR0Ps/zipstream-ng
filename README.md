@@ -100,12 +100,13 @@ installing the package and running `zipserver --help` or `python -m zipstream.se
 ### Integration with a Flask webapp
 
 A very basic [Flask](https://flask.palletsprojects.com/)-based file server that streams all the
-files under the requested path to the client as a zip file. It also provides the total size of the
-stream in the `Content-Length` header so the client can show a progress bar as the stream is
-downloaded.
+files under the requested path to the client as a zip file. It provides the total size of the stream
+in the `Content-Length` header so the client can show a progress bar as the stream is downloaded. It
+also provides a `Last-Modified` header so the client can check if it already has the most recent
+copy of the zipped data with a `HEAD` request instead of having to download the file and check.
 
 Note that while this example works, it's not a good idea to deploy it as-is due to the lack of input
-validation and other security checks.
+validation and other checks.
 
 ```python
 import os.path
@@ -114,9 +115,10 @@ from zipstream import ZipStream
 
 app = Flask(__name__)
 
-@app.route('/<path:path>', methods=['GET'])
+@app.route('/', defaults={'path': '.'})
+@app.route('/<path:path>')
 def stream_zip(path):
-    name = os.path.basename(os.path.normpath(path))
+    name = os.path.basename(os.path.abspath(path))
     zs = ZipStream.from_path(path)
     return Response(
         zs,
@@ -124,6 +126,7 @@ def stream_zip(path):
         headers={
             "Content-Disposition": f"attachment; filename={name}.zip",
             "Content-Length": len(zs),
+            "Last-Modified": zs.last_modified,
         }
     )
 

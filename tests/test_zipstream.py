@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import datetime
 import hashlib
 import io
 import itertools
@@ -559,6 +560,53 @@ def test_asking_for_files_after_complete():
     assert not list(zs.finalize())
 
 
+def test_last_modified(monkeypatch, files):
+    """Test that the last_modified property correctly reflects the dates of the
+    files in the archive"""
+
+    dates = {
+        "a": (2000, 1, 1, 1, 1, 1),
+        "b": (2000, 3, 1, 1, 1, 1),
+        "c": (2000, 2, 1, 1, 1, 1),
+        "d": (2107, 12, 31, 23, 59, 59),
+    }
+
+    zs = ZipStream()
+    assert zs.last_modified is None
+
+    orig_localtime = time.localtime
+
+    monkeypatch.setattr(time, "localtime", lambda _=None: dates["a"])
+    zs.add("a", "a.txt")
+    assert zs.last_modified == datetime.datetime(*dates["a"])
+
+    monkeypatch.setattr(time, "localtime", lambda _=None: dates["b"])
+    zs.add("b", "b.txt")
+    assert zs.last_modified == datetime.datetime(*dates["b"])
+
+    monkeypatch.setattr(time, "localtime", lambda _=None: dates["c"])
+    zs.add("c", "c.txt")
+    assert zs.last_modified == datetime.datetime(*dates["b"])
+
+    monkeypatch.setattr(time, "localtime", orig_localtime)
+    latest_file = 0
+    for f in files:
+        path  = f[0]
+        mtime = path.stat().st_mtime
+        if mtime > latest_file:
+            latest_file = mtime
+        zs.add_path(path)
+
+    assert zs.last_modified == datetime.datetime.fromtimestamp(int(latest_file))
+
+    monkeypatch.setattr(time, "localtime", lambda _=None: dates["d"])
+    zs.add("d", "d.txt")
+    assert zs.last_modified == datetime.datetime(*dates["d"])
+
+    zinfos = _get_zip(zs).infolist()
+    assert len(zinfos) == len(files) + len(dates)
+
+
 @pytest.mark.parametrize("date", [
     (0, 0, 0, 0, 0, 0),
     (1979, 12, 31, 23, 59, 59),
@@ -571,7 +619,7 @@ def test_invalid_dates(monkeypatch, date):
     """Test that dates outside the range that the zip format supports are
     automatically clamped to the closest valid value"""
 
-    def fakelocaltime():
+    def fakelocaltime(_=None):
         return date
     monkeypatch.setattr(time, "localtime", fakelocaltime)
 
@@ -593,7 +641,7 @@ def test_get_info(monkeypatch):
 
     faketime = (1980, 1, 1, 0, 0, 0)
 
-    def fakelocaltime():
+    def fakelocaltime(_=None):
         return faketime
     monkeypatch.setattr(time, "localtime", fakelocaltime)
 
