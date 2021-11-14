@@ -1,6 +1,10 @@
 zipstream-ng changelog
 ======================
 
+### [v1.3.1]
+- Allow importing functionality from `zipstream.ng` as well as `zipstream` to avoid namespace
+  collisions with other projects that provide a `zipstream` module.
+
 ### [v1.3.0]
 - Add a `last_modified` property to `ZipStream` objects that returns a `datetime` of the most recent
   modified date of all the files in the stream.
@@ -25,3 +29,4 @@ zipstream-ng changelog
  [v1.2.0]: https://github.com/pR0Ps/zipstream-ng/compare/v1.1.0...v1.2.0
  [v1.2.1]: https://github.com/pR0Ps/zipstream-ng/compare/v1.2.0...v1.2.1
  [v1.3.0]: https://github.com/pR0Ps/zipstream-ng/compare/v1.2.1...v1.3.0
+ [v1.3.1]: https://github.com/pR0Ps/zipstream-ng/compare/v1.3.0...v1.3.1
