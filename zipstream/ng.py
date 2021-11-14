@@ -31,6 +31,7 @@ from zipfile import (
     crc32, _get_compressor, _check_compression as _check_compress_type,
 )
 
+
 # Size of chunks to read out of files
 # Note that when compressing data the compressor will operate on bigger chunks
 # than this - it keeps a cache as new chunks are fed to it.
@@ -49,6 +50,13 @@ ZIP64_ESTIMATE_FACTOR = 1.05
 PY36_COMPAT = sys.version_info < (3, 7)  # disable compress_level
 PY35_COMPAT = sys.version_info < (3, 6)  # backport ZipInfo functions, stringify path-like objects
 
+
+__all__ = [
+    # Defined classes
+    "ZipStream", "ZipStreamInfo",
+    # Compression constants (imported from zipfile)
+    "ZIP_STORED", "ZIP_DEFLATED", "BZIP2_VERSION", "ZIP_BZIP2", "LZMA_VERSION", "ZIP_LZMA",
+]
 
 __log__ = logging.getLogger(__name__)
 

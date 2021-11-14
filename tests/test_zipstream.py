@@ -236,18 +236,13 @@ def test_footer_partial(files):
     _verify_zip_contains(zf, files[0])
 
 
+@pytest.mark.skipif(not PY36, reason="Tests error handling when compress_level is unavailable (Python <3.7 only)")
 @pytest.mark.parametrize("ct", [
     zipfile.ZIP_STORED,
     zipfile.ZIP_LZMA
 ])
 def test_compress_level_python_36(monkeypatch, ct):
     """Test that using compress_level on <3.7 produces an error"""
-
-    # Test that the module-level attribute is set correctly
-    assert zipstream.PY36_COMPAT == PY36
-
-    # Patch it to let the test work on all versions
-    monkeypatch.setattr(zipstream.ng, "PY36_COMPAT", True)
 
     with pytest.raises(ValueError, match="compress_level is not supported"):
         ZipStream(compress_type=ct, compress_level=1)
