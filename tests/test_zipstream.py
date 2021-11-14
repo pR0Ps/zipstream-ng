@@ -136,7 +136,7 @@ def test_zipstream_normal_paths(monkeypatch, files, zip64):
     """Test adding paths and iterating"""
     if zip64:
         monkeypatch.setattr(zipfile, "ZIP64_LIMIT", 100)
-        monkeypatch.setattr(zipstream, "ZIP64_LIMIT", 100)
+        monkeypatch.setattr(zipstream.ng, "ZIP64_LIMIT", 100)
 
     zs = ZipStream()
     for f in files:
@@ -247,7 +247,7 @@ def test_compress_level_python_36(monkeypatch, ct):
     assert zipstream.PY36_COMPAT == PY36
 
     # Patch it to let the test work on all versions
-    monkeypatch.setattr(zipstream, "PY36_COMPAT", True)
+    monkeypatch.setattr(zipstream.ng, "PY36_COMPAT", True)
 
     with pytest.raises(ValueError, match="compress_level is not supported"):
         ZipStream(compress_type=ct, compress_level=1)
@@ -817,7 +817,7 @@ def test_sized_zipstream(monkeypatch, files, zip64):
 
     if zip64:
         monkeypatch.setattr(zipfile, "ZIP64_LIMIT", 100)
-        monkeypatch.setattr(zipstream, "ZIP64_LIMIT", 100)
+        monkeypatch.setattr(zipstream.ng, "ZIP64_LIMIT", 100)
 
     with pytest.raises(ValueError):
         ZipStream(sized=True, compress_type=zipfile.ZIP_DEFLATED)
@@ -867,7 +867,7 @@ def test_sized_zipstream_size_while_adding(monkeypatch, files, zip64):
 
     if zip64:
         monkeypatch.setattr(zipfile, "ZIP64_LIMIT", 100)
-        monkeypatch.setattr(zipstream, "ZIP64_LIMIT", 100)
+        monkeypatch.setattr(zipstream.ng, "ZIP64_LIMIT", 100)
 
     # Get sizes of zips with a subset of files in them
     sizes = []

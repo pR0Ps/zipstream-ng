@@ -20,7 +20,7 @@ import os
 import sys
 import urllib
 
-from zipstream import ZipStream
+from zipstream.ng import ZipStream
 
 
 class ZippingHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
