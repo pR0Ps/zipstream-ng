@@ -308,6 +308,47 @@ def test_invalid_compression(ct):
             zs.add(".", arcname=".", compress_type=ct)
 
 
+def test_external_attrs(tmpdir):
+    folder = tmpdir.mkdir("folder-frompath")
+    file = tmpdir.join("file-frompath")
+    file.write(b"")
+
+    zs = ZipStream()
+    zs.add_path(folder)
+    zs.add_path(file)
+    zs.add(None, "folder-fromadd/")
+    zs.add(b"", "file-fromadd")
+
+    # Test values:
+    # 0x10          = MS-DOS directory flag
+    # 0o40000 << 16 = d---------
+    # 0o40775 << 16 = drwxrwxr-x
+    # 0o600 << 16   = ?rw-------
+
+    zinfos = _get_zip(zs).infolist()
+    assert len(zinfos) == 4
+    assert zinfos[0].filename == "folder-frompath/"
+    assert zinfos[0].is_dir()
+    assert zinfos[0].external_attr & 0x10
+    assert zinfos[0].external_attr & 0o40000 << 16
+
+    assert zinfos[1].filename == "file-frompath"
+    assert not zinfos[1].is_dir()
+    assert not zinfos[1].external_attr & 0x10
+    assert not zinfos[1].external_attr & 0o40000 << 16
+
+    assert zinfos[2].filename == "folder-fromadd/"
+    assert zinfos[2].is_dir()
+    assert zinfos[2].external_attr & 0x10
+    assert zinfos[2].external_attr & 0o40775 << 16
+
+    assert zinfos[3].filename == "file-fromadd"
+    assert not zinfos[3].is_dir()
+    assert not zinfos[3].external_attr & 0x10
+    assert not zinfos[3].external_attr & 0o40000 << 16
+    assert zinfos[3].external_attr & 0o600 << 16
+
+
 def test_creating_dirs_with_data():
     """Test creating directories works except when adding data to them"""
     zs = ZipStream()

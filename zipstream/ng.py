@@ -559,7 +559,7 @@ class ZipStream(object):
                 name = os.path.relpath(filepath, path)
                 if not f:
                     # adding an empty directory - make sure it has a trailing slash
-                    name += os.sep
+                    name += "/"
 
                 self._enqueue(
                     path=filepath,
@@ -788,7 +788,13 @@ class ZipStream(object):
             zinfo = ZipStreamInfo.from_file(path, arcname)
         else:
             zinfo = ZipStreamInfo(arcname)
-            zinfo.external_attr = 0o600 << 16  # ?rw-------
+            # Set the external attributes in the same way as ZipFile.writestr
+            if zinfo.is_dir():
+                zinfo.external_attr = 0o40775 << 16  # drwxrwxr-x
+                zinfo.external_attr |= 0x10  # MS-DOS directory flag
+            else:
+                zinfo.external_attr = 0o600 << 16  # ?rw-------
+
             if data is not None:
                 zinfo.file_size = len(data)
 
@@ -946,7 +952,7 @@ class ZipStream(object):
             self._size_prog = (num_files, files_size, cdfh_size)
 
         # Calculate the amount of data the end of central directory needs. This
-        # is computed every time since it depends on the other metrics.  Also,
+        # is computed every time since it depends on the other metrics. Also,
         # it means that we don't have to deal with detecting if the comment
         # changes.
         eocd_size = sizeEndCentDir + len(self._comment)  # 22 + comment len
