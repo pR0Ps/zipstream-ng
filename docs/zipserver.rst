@@ -6,7 +6,7 @@ zipserver
 Simple ZIP fileserver
 ---------------------
 
-:Author: Louis-Philippe Véronneau
+:Authors: Manpage written by Louis-Philippe Véronneau
 :Date: 2021
 :Manual section: 1
 
