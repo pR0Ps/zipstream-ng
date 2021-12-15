@@ -555,16 +555,16 @@ class ZipStream(object):
                 files = [""]
 
             for f in files:
-                filepath=os.path.join(dirpath, f)
-                name = os.path.relpath(filepath, path)
+                filepath = os.path.join(dirpath, f)
+                filename = os.path.relpath(filepath, path)
+                filearcname = os.path.normpath(os.path.join(arcname, filename))
                 if not f:
                     # adding an empty directory - make sure it has a trailing slash
-                    name += "/"
+                    filearcname += "/"
 
                 self._enqueue(
                     path=filepath,
-                    # Use the arcname as the base path for the files
-                    arcname=os.path.join(arcname, name),
+                    arcname=filearcname,
                     compress_type=compress_type,
                     compress_level=compress_level
                 )

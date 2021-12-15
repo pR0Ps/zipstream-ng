@@ -367,6 +367,22 @@ def test_creating_dirs_with_data():
         assert zinfos[i].compress_size == 0
 
 
+def test_directly_adding_empty_dir(tmpdir):
+    """Test adding an empty directory"""
+    t = tmpdir.mkdir("empty")
+
+    zs = ZipStream.from_path(t)
+    data = bytes(zs)
+    assert len(data) == len(zs)
+
+    zinfos = sorted(_get_zip(data).infolist(), key=lambda x: x.filename)
+    assert len(zinfos) == 1
+    assert zinfos[0].filename == "empty/"
+    assert zinfos[0].is_dir()
+    assert zinfos[0].file_size == 0
+    assert zinfos[0].compress_size == 0
+
+
 def test_empty_folders_preserved_recursive(tmpdir):
     """Test that recursively adding a directory preserves empty files and folders in it"""
     t = tmpdir.mkdir("top")
