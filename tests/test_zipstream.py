@@ -383,6 +383,31 @@ def test_directly_adding_empty_dir(tmpdir):
     assert zinfos[0].compress_size == 0
 
 
+def test_adding_local_dir(tmpdir):
+    """Test adding files/folder from the local directory doesn't include the directory name of ."""
+    t = tmpdir.mkdir("top")
+    t.mkdir("empty")
+    t.mkdir("not_empty").join("file.txt").write(b'x')
+
+    os.chdir(str(t))
+
+    zs = ZipStream.from_path(".")
+    data = bytes(zs)
+    assert len(data) == len(zs)
+
+    zinfos = sorted(_get_zip(data).infolist(), key=lambda x: x.filename)
+    assert len(zinfos) == 2
+    assert zinfos[0].filename == "empty/"
+    assert zinfos[0].is_dir()
+    assert zinfos[0].file_size == 0
+    assert zinfos[0].compress_size == 0
+
+    assert zinfos[1].filename == "not_empty/file.txt"
+    assert not zinfos[1].is_dir()
+    assert zinfos[1].file_size == 1
+    assert zinfos[1].compress_size == 1
+
+
 def test_empty_folders_preserved_recursive(tmpdir):
     """Test that recursively adding a directory preserves empty files and folders in it"""
     t = tmpdir.mkdir("top")
