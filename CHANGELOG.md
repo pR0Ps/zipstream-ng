@@ -1,6 +1,10 @@
 zipstream-ng changelog
 ======================
 
+### [v1.3.3]
+- Fix issue where directly adding an empty folder would give it the wrong name in the archive and
+  lead to an incorrect zip size being calculated.
+
 ### [v1.3.2]
 - Fix documentation issue caused by the import shuffling in v1.3.1
 - Set external attributes (permissions, directory flag, etc) on data added to the `ZipStream` via `add()`
@@ -35,3 +39,4 @@ zipstream-ng changelog
  [v1.3.0]: https://github.com/pR0Ps/zipstream-ng/compare/v1.2.1...v1.3.0
  [v1.3.1]: https://github.com/pR0Ps/zipstream-ng/compare/v1.3.0...v1.3.1
  [v1.3.2]: https://github.com/pR0Ps/zipstream-ng/compare/v1.3.1...v1.3.2
+ [v1.3.3]: https://github.com/pR0Ps/zipstream-ng/compare/v1.3.2...v1.3.3
