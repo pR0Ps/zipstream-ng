@@ -14,7 +14,7 @@ except Exception:
 
 setup(
     name="zipstream-ng",
-    version="1.3.3",
+    version="1.3.4",
     description="A modern and easy to use streamable zip file generator",
     long_description=long_description,
     long_description_content_type="text/markdown",

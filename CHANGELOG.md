@@ -1,6 +1,10 @@
 zipstream-ng changelog
 ======================
 
+### [v1.3.4]
+- Fix issue where adding files with multibyte characters in the filename would lead to an incorrect
+  zip size being calculated.
+
 ### [v1.3.3]
 - Fix issue where directly adding an empty folder would give it the wrong name in the archive and
   lead to an incorrect zip size being calculated.
@@ -40,3 +44,4 @@ zipstream-ng changelog
  [v1.3.1]: https://github.com/pR0Ps/zipstream-ng/compare/v1.3.0...v1.3.1
  [v1.3.2]: https://github.com/pR0Ps/zipstream-ng/compare/v1.3.1...v1.3.2
  [v1.3.3]: https://github.com/pR0Ps/zipstream-ng/compare/v1.3.2...v1.3.3
+ [v1.3.4]: https://github.com/pR0Ps/zipstream-ng/compare/v1.3.3...v1.3.4
