@@ -904,6 +904,13 @@ class ZipStream(object):
                 except IndexError:
                     break
 
+                # Get the number of bytes the arcname uses by encoding it in
+                # the same way that ZipStreamInfo._encodeFilenameFlags does
+                try:
+                    arcname_len = len(arcname.encode("ascii"))
+                except UnicodeEncodeError:
+                    arcname_len = len(arcname.encode("utf-8"))
+
                 # Calculate if zip64 extensions are required in the same way that
                 # ZipStreamInfo.file_data does
                 uses_zip64 = size * ZIP64_ESTIMATE_FACTOR > ZIP64_LIMIT
@@ -918,7 +925,7 @@ class ZipStream(object):
                     cdfh_extras += 1
 
                 # FileHeader
-                files_size += sizeFileHeader + len(arcname) # 30 + name len
+                files_size += sizeFileHeader + arcname_len # 30 + name len
 
                 # Folders don't have any data or require any extra records
                 if arcname[-1] not in (os.sep, "/"):
@@ -940,7 +947,7 @@ class ZipStream(object):
                         cdfh_extras += 2
 
                 cdfh_size += sizeCentralDir  # 46
-                cdfh_size += len(arcname)
+                cdfh_size += arcname_len
 
                 # Add space for extra data
                 if cdfh_extras:

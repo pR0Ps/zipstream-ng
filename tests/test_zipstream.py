@@ -308,6 +308,25 @@ def test_invalid_compression(ct):
             zs.add(".", arcname=".", compress_type=ct)
 
 
+def test_multibyte_and_non_ascii_characters_in_filenames():
+    zs = ZipStream(sized=True)
+    zs.add(None, "☆/")
+    zs.add(b"some data", "Здравствуйте")
+    zs.add(b"", "你好")
+
+    data = bytes(zs)
+    assert len(data) == len(zs)
+
+    zinfos = _get_zip(data).infolist()
+    assert len(zinfos) == 3
+    assert zinfos[0].filename == "☆/"
+    assert zinfos[0].is_dir()
+    assert zinfos[1].filename == "Здравствуйте"
+    assert not zinfos[1].is_dir()
+    assert zinfos[2].filename == "你好"
+    assert not zinfos[2].is_dir()
+
+
 def test_external_attrs(tmpdir):
     folder = tmpdir.mkdir("folder-frompath")
     file = tmpdir.join("file-frompath")
@@ -431,6 +450,7 @@ def test_empty_folders_preserved_recursive(tmpdir):
     assert not zinfos[1].is_dir()
     assert zinfos[1].file_size == 0
     assert zinfos[1].compress_size == 0
+
 
 def test_recursion_disable(tmpdir):
     """Test that recursion can be disabled to just add a single (empty) folder"""
