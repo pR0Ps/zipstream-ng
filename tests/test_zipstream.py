@@ -15,8 +15,8 @@ import zlib
 
 import pytest
 
-import zipstream
-from zipstream import ZipStream
+import zipstream_ng
+from zipstream_ng import ZipStream
 
 
 PY36 = sys.version_info < (3, 7)
@@ -35,7 +35,7 @@ FILES = [
 def add_is_dir(monkeypatch):
     monkeypatch.setattr(
         zipfile.ZipInfo, "is_dir",
-        zipstream.ZipStreamInfo.is_dir,
+        zipstream_ng.ZipStreamInfo.is_dir,
         raising=False
     )
 
@@ -136,7 +136,7 @@ def test_zipstream_normal_paths(monkeypatch, files, zip64):
     """Test adding paths and iterating"""
     if zip64:
         monkeypatch.setattr(zipfile, "ZIP64_LIMIT", 100)
-        monkeypatch.setattr(zipstream.ng, "ZIP64_LIMIT", 100)
+        monkeypatch.setattr(zipstream_ng, "ZIP64_LIMIT", 100)
 
     zs = ZipStream()
     for f in files:
@@ -914,7 +914,7 @@ def test_sized_zipstream(monkeypatch, files, zip64):
 
     if zip64:
         monkeypatch.setattr(zipfile, "ZIP64_LIMIT", 100)
-        monkeypatch.setattr(zipstream.ng, "ZIP64_LIMIT", 100)
+        monkeypatch.setattr(zipstream_ng, "ZIP64_LIMIT", 100)
 
     with pytest.raises(ValueError):
         ZipStream(sized=True, compress_type=zipfile.ZIP_DEFLATED)
@@ -964,7 +964,7 @@ def test_sized_zipstream_size_while_adding(monkeypatch, files, zip64):
 
     if zip64:
         monkeypatch.setattr(zipfile, "ZIP64_LIMIT", 100)
-        monkeypatch.setattr(zipstream.ng, "ZIP64_LIMIT", 100)
+        monkeypatch.setattr(zipstream_ng, "ZIP64_LIMIT", 100)
 
     # Get sizes of zips with a subset of files in them
     sizes = []

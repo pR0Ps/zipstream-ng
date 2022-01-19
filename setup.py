@@ -32,9 +32,9 @@ setup(
         "Topic :: System :: Archiving :: Compression",
         "License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)"
     ],
-    packages=["zipstream"],
+    packages=["zipstream_ng"],
     entry_points={
-        "console_scripts": ["zipserver=zipstream.server:main"]
+        "console_scripts": ["zipserver=zipstream_ng.server:main"]
     },
     python_requires=">=3.5.0",
     extras_require={

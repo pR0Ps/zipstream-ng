@@ -38,4 +38,4 @@ jobs:
 
     - name: Run tests
       run: |
-        py.test --cov=zipstream
+        py.test --cov=zipstream_ng
