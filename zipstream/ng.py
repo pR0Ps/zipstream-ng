@@ -46,6 +46,10 @@ MAX_DATE = (2107, 12, 31, 23, 59, 59)
 # be slightly bigger than uncompressed.
 ZIP64_ESTIMATE_FACTOR = 1.05
 
+# Characters that are to be considered path separators on the current platform
+# (includes "/" regardless of platform as per ZIP format specification)
+PATH_SEPARATORS = set(x for x in (os.sep, os.altsep, "/") if x)
+
 # Constants for compatibility modes
 PY36_COMPAT = sys.version_info < (3, 7)  # disable compress_level
 PY35_COMPAT = sys.version_info < (3, 6)  # backport ZipInfo functions, stringify path-like objects
@@ -610,8 +614,7 @@ class ZipStream(object):
             # change while we're iterating over it.
             data = bytes(data)
 
-        # Check platform-specific separator as well as zip-specific
-        if data != b'' and arcname[-1] in (os.sep, "/"):
+        if data != b'' and arcname[-1] in PATH_SEPARATORS:
             raise ValueError("Can't store data as a directory")
 
         if isinstance(data, bytes):
@@ -928,7 +931,7 @@ class ZipStream(object):
                 files_size += sizeFileHeader + arcname_len # 30 + name len
 
                 # Folders don't have any data or require any extra records
-                if arcname[-1] not in (os.sep, "/"):
+                if arcname[-1] not in PATH_SEPARATORS:
 
                     # When using zip64, the size and compressed size of the file are
                     # written as an extra field in the FileHeader.

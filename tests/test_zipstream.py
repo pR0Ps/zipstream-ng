@@ -6,6 +6,7 @@ import io
 import itertools
 import json
 import logging
+import ntpath
 import os
 import random
 import sys
@@ -325,6 +326,29 @@ def test_multibyte_and_non_ascii_characters_in_filenames():
     assert not zinfos[1].is_dir()
     assert zinfos[2].filename == "你好"
     assert not zinfos[2].is_dir()
+
+
+def test_adding_windows_paths(monkeypatch):
+    """Test that paths ending with both \\ and / are considered folders on Windows"""
+
+    # mock os-specific path separators and recompute PATH_SEPARATORS to fake being on Windows
+    monkeypatch.setattr(os, "sep", ntpath.sep)
+    monkeypatch.setattr(os, "altsep", ntpath.altsep)
+    monkeypatch.setattr(zipstream.ng, "PATH_SEPARATORS", set(x for x in (os.sep, os.altsep, "/") if x))
+    zs = ZipStream(sized=True)
+    zs.add("", "a/b\\")
+    zs.add("", "a\\b/")
+    zs.add("", "a\\b\\")
+
+    predicted = len(zs)
+    actual = len(bytes(zs))
+
+    assert predicted == actual
+
+    info = zs.get_info()
+    assert len(info) == 3
+    for x in info:
+        assert x["name"] == "a/b/"
 
 
 def test_external_attrs(tmpdir):
