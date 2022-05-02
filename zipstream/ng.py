@@ -645,7 +645,7 @@ class ZipStream(object):
         Returns a `datetime.datetime` object or `None` if the ZipStream is
         empty.
         """
-        return datetime.datetime(*self._last_modified) if self else None
+        return datetime.datetime(*self._last_modified) if self._last_modified else None
 
     @property
     def comment(self):
