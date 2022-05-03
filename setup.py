@@ -19,6 +19,10 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/pR0Ps/zipstream-ng",
+    project_urls={
+        "Source": "https://github.com/pR0Ps/zipstream-ng",
+        "Changelog": "https://github.com/pR0Ps/zipstream-ng/blob/master/CHANGELOG.md",
+    },
     license="LGPLv3",
     classifiers=[
         "Programming Language :: Python :: 3",
