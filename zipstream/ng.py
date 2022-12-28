@@ -457,9 +457,10 @@ class ZipStream:
             prior to being generated, making it work with the `len()` function.
             Enabling this will enforce two restrictions:
               - No compression can be used
-              - Any iterables added to the stream will immediately be read fully
-                into memory since the size of them needs to be known at the time
-                they are added.
+              - Any iterables added to the stream without also specifying their
+                size (see `.add` docs) will immediately be read fully into
+                memory. This is because the size of the data they will produce
+                must be known prior to the stream being generated.
 
             If `False` (the default), no restrictions are enforced and using the
             object with the `len()` function will not work (will raise a
@@ -648,7 +649,7 @@ class ZipStream:
 
     @_validate_final
     @_validate_compression
-    def add(self, data, arcname, *, compress_type=None, compress_level=None):
+    def add(self, data, arcname, *, size=None, compress_type=None, compress_level=None):
         """Queue up data to be added to the ZipStream
 
         `data` can be bytes, a string (encoded to bytes using utf-8), or any
@@ -661,6 +662,10 @@ class ZipStream:
         `arcname` (required) is the name of the file to store the data in. If
         any `data` is provided then the `arcname` cannot end with a "/" as this
         would create a directory (which can't contain content).
+
+        `size` (optional) specifies the size of the `data` ONLY in the case
+        where it is an iterator and the ZipStream is sized. It is ignored in
+        all other cases.
 
         Note that the data provided will not be used until the file is actually
         encoded in the ZipStream. This means that strings and bytes will be held
@@ -700,6 +705,7 @@ class ZipStream:
         elif hasattr(data, "__iter__"):
             self._enqueue(
                 iterable=data,
+                size=size if self._sized else None,
                 arcname=arcname,
                 compress_type=compress_type,
                 compress_level=compress_level,

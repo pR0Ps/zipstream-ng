@@ -648,6 +648,27 @@ def test_adding_changed_path(caplog, tmpdir, sized, data):
     assert msg in caplog.text
 
 
+@pytest.mark.parametrize("sized", (True, False))
+@pytest.mark.parametrize("size", (None, -1, 0, 1, 100))
+def test_adding_iterator_invalid_size(caplog, sized, size):
+    """Make sure errors are raised when generating if an incorrect iterator size was provided"""
+    caplog.set_level(logging.WARNING)
+
+    l_rand = len(b''.join(_gen_rand()))
+
+    zs = ZipStream(sized=sized)
+    zs.add(_gen_rand(), "rand.txt", size=size)
+
+    assert not caplog.text
+    if sized and size is not None:
+        with pytest.raises(RuntimeError, match="Error adding 'rand.txt' to sized ZipStream"):
+            bytes(zs)
+        assert "Size mismatch when adding data for 'rand.txt'" in caplog.text
+    else:
+        bytes(zs)
+        assert "Size mismatch" not in caplog.text
+
+
 def test_adding_comment(caplog):
     caplog.set_level(logging.WARNING)
 
@@ -1011,6 +1032,27 @@ def test_proper_zip64_min_version(monkeypatch, zip64, sized):
 
     assert zi.create_version == expected_version
     assert zi.extract_version == expected_version
+
+
+@pytest.mark.parametrize("sized", [False, True])
+@pytest.mark.parametrize("known_size", [False, True])
+def test_adding_iterator_sized(sized, known_size):
+    """Check that adding an iterator to the ZipStream only immediately reads it
+    into memory if the ZipStream is sized and the size isn't provided
+    """
+    read = False
+    def _my_iter():
+        nonlocal read
+        yield from _gen_rand()
+        read = True
+
+    l_rand = len(b''.join(_gen_rand()))
+
+    zs = ZipStream(sized=sized)
+    zs.add(_my_iter(), "rand.txt", size=None if not known_size else l_rand)
+    assert read == (False if known_size else sized)
+    bytes(zs)
+    assert read
 
 
 @pytest.mark.parametrize("zip64", [False, True])
