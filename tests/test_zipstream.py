@@ -115,13 +115,18 @@ def _gen_rand():
     zipfile.ZIP_DEFLATED,
     zipfile.ZIP_BZIP2
 ])
-def test_zipstream_compression(files, ct):
+def test_zipstream_compression(caplog, files, ct):
     """Test that all types of compression properly compress and extract"""
+    caplog.set_level(logging.WARNING)
+
     zs = ZipStream(compress_type=ct)
     for f in files:
         zs.add_path(f[0])
 
     zf = _get_zip(zs)
+
+    assert "Size mismatch" not in caplog.text
+
     zinfos = zf.infolist()
     assert len(zinfos) == len(files)
 
@@ -498,9 +503,17 @@ def test_recursion_disable(tmpdir):
     [b'a', b'list', b'of', b'bytes'],
     _gen_rand()
 ])
-def test_adding_data(data):
-    """Test adding non-files"""
-    zs = ZipStream()
+@pytest.mark.parametrize("ct", [
+    zipfile.ZIP_STORED,
+    zipfile.ZIP_LZMA,
+    zipfile.ZIP_DEFLATED,
+    zipfile.ZIP_BZIP2
+])
+def test_adding_data(caplog, data, ct):
+    """Test adding non-files with different compression methods"""
+    caplog.set_level(logging.WARNING)
+
+    zs = ZipStream(compress_type=ct)
 
     tostore = data
     if isinstance(data, str):
@@ -519,8 +532,12 @@ def test_adding_data(data):
     zs.add(tostore, "data.bin")
     zf = _get_zip(zs)
 
+    assert "Size mismatch" not in caplog.text
+
     zinfos = zf.infolist()
     assert len(zinfos) == 1
+
+    assert zinfos[0].compress_type == ct
 
     from_file = zf.read(zinfos[0])
     assert from_file == data
@@ -588,6 +605,47 @@ def test_directory_links_without_infinite_recursion(tmpdir):
 def test_adding_missing_path(tmpdir):
     with pytest.raises(ValueError):
         ZipStream.from_path(tmpdir.join("doesntexist"))
+
+
+def test_adding_deleted_path(tmpdir):
+    zs = ZipStream(sized=True)
+    f = tmpdir.join("file")
+    f.write(b"this is some data")
+    zs.add_path(f)
+    assert len(zs) == 139
+    f.remove()
+    assert len(zs) == 139
+
+    with pytest.raises(FileNotFoundError):
+        bytes(zs)
+
+
+@pytest.mark.parametrize("data", [
+    ("short text", "then longer text"),
+    ("first longer text", "then shorter"),
+])
+@pytest.mark.parametrize("sized", (True, False))
+def test_adding_changed_path(caplog, tmpdir, sized, data):
+    caplog.set_level(logging.WARNING)
+
+    zs = ZipStream(sized=sized)
+    f = tmpdir.join("file")
+    f.write(data[0])
+    zs.add_path(f)
+    f.write(data[1])  # overwrites, doesn't append
+
+    assert not caplog.text
+    if sized:
+        with pytest.raises(RuntimeError, match="Error adding 'file' to sized ZipStream"):
+            bytes(zs)
+    else:
+        bytes(zs)
+
+    msg = "Size mismatch when adding data for 'file' (expected {} bytes, got {})".format(
+        len(data[0]),
+        len(data[1])
+    )
+    assert msg in caplog.text
 
 
 def test_adding_comment(caplog):
@@ -904,6 +962,7 @@ def test_readme_stdlib_comparison(tmpdir):
         _get_zip(ZipStream.from_path(t))
     )
 
+
 def test_add_duplicate_file():
     """Test adding multiple files with the same name works"""
     zs = ZipStream(sized=True)
@@ -924,7 +983,7 @@ def test_add_duplicate_file():
 
 
 def test_unsized_zipstream_len_typeerror():
-    """Test that an unsized ZipStream raises a TypeError when aske for the length"""
+    """Test that an unsized ZipStream raises a TypeError when asked for the length"""
     zs = ZipStream(sized=False)
     assert not zs.sized
 
@@ -934,7 +993,7 @@ def test_unsized_zipstream_len_typeerror():
 
 @pytest.mark.parametrize("zip64", [False, True])
 @pytest.mark.parametrize("sized", [False, True])
-def test_proper_zip64_min_version(monkeypatch, files, zip64, sized):
+def test_proper_zip64_min_version(monkeypatch, zip64, sized):
     """Ensure that the min version is set properly"""
     if zip64:
         monkeypatch.setattr(zipfile, "ZIP64_LIMIT", 100)
