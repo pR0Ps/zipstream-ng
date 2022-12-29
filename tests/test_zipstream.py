@@ -242,7 +242,7 @@ def test_footer_partial(files):
     zipfile.ZIP_STORED,
     zipfile.ZIP_LZMA
 ])
-def test_compress_level_python_36(monkeypatch, ct):
+def test_compress_level_python_36(ct):
     """Test that using compress_level on <3.7 produces an error"""
 
     with pytest.raises(ValueError, match="compress_level is not supported"):
@@ -930,6 +930,28 @@ def test_unsized_zipstream_len_typeerror():
 
     with pytest.raises(TypeError):
         len(ZipStream(sized=False))
+
+
+@pytest.mark.parametrize("zip64", [False, True])
+@pytest.mark.parametrize("sized", [False, True])
+def test_proper_zip64_min_version(monkeypatch, files, zip64, sized):
+    """Ensure that the min version is set properly"""
+    if zip64:
+        monkeypatch.setattr(zipfile, "ZIP64_LIMIT", 100)
+        monkeypatch.setattr(zipstream.ng, "ZIP64_LIMIT", 100)
+
+    zs = ZipStream(sized=sized)
+    zs.add(_gen_rand(), "rand.txt")
+
+    zi = _get_zip(zs).infolist()[0]
+    # A sized zipstream will pull the entire iterator into memory and realize
+    # that zip64 is not required.
+    # An unsized zipstream will not pull it into memory and be forced to use
+    # zip64 extensions since the size could be too big
+    expected_version = (zipfile.DEFAULT_VERSION if sized and not zip64 else zipfile.ZIP64_VERSION)
+
+    assert zi.create_version == expected_version
+    assert zi.extract_version == expected_version
 
 
 @pytest.mark.parametrize("zip64", [False, True])

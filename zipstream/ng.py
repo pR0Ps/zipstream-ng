@@ -21,9 +21,9 @@ from zipfile import (
     ZIP64_VERSION, BZIP2_VERSION, ZIP_BZIP2, LZMA_VERSION, ZIP_LZMA,
     ZIP_DEFLATED,
     # Byte sequence constants
-    structCentralDir, structEndArchive64, structEndArchive,
-    structEndArchive64Locator, stringCentralDir, stringEndArchive64,
-    stringEndArchive, stringEndArchive64Locator,
+    structFileHeader, structCentralDir, structEndArchive64, structEndArchive,
+    structEndArchive64Locator, stringFileHeader, stringCentralDir,
+    stringEndArchive64, stringEndArchive, stringEndArchive64Locator,
     # Size constants
     sizeFileHeader, sizeCentralDir, sizeEndCentDir, sizeEndCentDir64Locator,
     sizeEndCentDir64,
@@ -90,6 +90,14 @@ def _check_compression(compress_type, compress_level):
         )
 
 
+def _timestamp_to_dos(ts):
+    """Takes an integer timestamp and converts it to a (dosdate, dostime) tuple"""
+    return (
+        (ts[0] - 1980) << 9 | ts[1] << 5 | ts[2],
+        ts[3] << 11 | ts[4] << 5 | (ts[5] // 2)
+    )
+
+
 class ZipStreamInfo(ZipInfo):
     """A ZipInfo subclass that always uses a data descriptor to store filesize data"""
 
@@ -114,12 +122,80 @@ class ZipStreamInfo(ZipInfo):
         # before it like normal. This is essential for making the zip data
         # streamable
         return struct.pack(
-            b'<4sLQQ' if zip64 else b'<4sLLL',
+            "<4sLQQ" if zip64 else "<4sLLL",
             b'PK\x07\x08',  # Data descriptor signature
             self.CRC,
             self.compress_size,
             self.file_size
         )
+
+    def FileHeader(self, zip64):
+        """Return the per-file header as bytes"""
+        # Based on code in zipfile.ZipInfo.FileHeader
+
+        # Logic for where the file sizes are listed is as follows:
+        # From the zip spec:
+        # - When using a data descriptor, the file sizes should be listed as 0
+        #   in the file header.
+        # - When using Zip64, the header size fields should always be set to
+        #   0xFFFFFFFF to indicate that the size is in the Zip64 extra field.
+        # - The format of the data descriptor depends on if a Zip64 extra field
+        #   is present in the file header.
+        # Assumption:
+        # - When using both a data descriptor and Zip64 extensions, the header
+        #   size fields should be set to 0xFFFFFFFF to indicate that the true
+        #   sizes are in the required Zip64 extra field, which should list the
+        #   sizes as 0 to defer to the data descriptor.
+
+        dosdate, dostime = _timestamp_to_dos(self.date_time)
+        if self.flag_bits & 0x08:
+            # Using a data descriptor record to record the file sizes, set
+            # everything to 0 since they'll be written there instead.
+            CRC = compress_size = file_size = 0
+        else:
+            CRC = self.CRC
+            compress_size = self.compress_size
+            file_size = self.file_size
+
+        min_version = 0
+        extra = self.extra
+        if zip64:
+            min_version = ZIP64_VERSION
+            extra += struct.pack(
+                "<HHQQ",
+                0x01,  # Zip64 extended information extra field identifier
+                16,  # length of the following "QQ" data
+                file_size,
+                compress_size,
+            )
+            # Indicate that the size is in the Zip64 extra field instead
+            file_size = 0xFFFFFFFF
+            compress_size = 0xFFFFFFFF
+
+        if self.compress_type == ZIP_BZIP2:
+            min_version = max(BZIP2_VERSION, min_version)
+        elif self.compress_type == ZIP_LZMA:
+            min_version = max(LZMA_VERSION, min_version)
+
+        self.extract_version = max(min_version, self.extract_version)
+        self.create_version = max(min_version, self.create_version)
+        filename, flag_bits = self._encodeFilenameFlags()
+        header = struct.pack(
+            structFileHeader,
+            stringFileHeader,
+            self.extract_version,
+            self.reserved,
+            flag_bits,
+            self.compress_type,
+            dostime,
+            dosdate,
+            CRC,
+            compress_size,
+            file_size,
+            len(filename),
+            len(extra)
+        )
+        return header + filename + extra
 
     def _file_data(self, iterable=None, force_zip64=False):
         """Given an iterable of file data, yield a local file header and file
@@ -197,9 +273,7 @@ class ZipStreamInfo(ZipInfo):
         """Yield a central directory file header for this file"""
         # Based on code in zipfile.ZipFile._write_end_record
 
-        dt = self.date_time
-        dosdate = (dt[0] - 1980) << 9 | dt[1] << 5 | dt[2]
-        dostime = dt[3] << 11 | dt[4] << 5 | (dt[5] // 2)
+        dosdate, dostime = _timestamp_to_dos(self.date_time)
         extra = []
 
         # Store sizes and offsets in the extra data if they're too big
