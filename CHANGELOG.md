@@ -1,6 +1,11 @@
 zipstream-ng changelog
 ======================
 
+### [v1.3.5]
+- Fix issue where adding data via a generator to an unsized `ZipStream` wouldn't fully implement
+  Zip64 extensions. This caused some versions of `7z` to emit warnings (but still properly extract
+  the data).
+
 ### [v1.3.4]
 - Fix issue where adding files with multibyte characters in the filename would lead to an incorrect
   zip size being calculated.
@@ -45,3 +50,4 @@ zipstream-ng changelog
  [v1.3.2]: https://github.com/pR0Ps/zipstream-ng/compare/v1.3.1...v1.3.2
  [v1.3.3]: https://github.com/pR0Ps/zipstream-ng/compare/v1.3.2...v1.3.3
  [v1.3.4]: https://github.com/pR0Ps/zipstream-ng/compare/v1.3.3...v1.3.4
+ [v1.3.5]: https://github.com/pR0Ps/zipstream-ng/compare/v1.3.4...v1.3.5
