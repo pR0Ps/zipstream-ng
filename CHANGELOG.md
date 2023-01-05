@@ -1,8 +1,16 @@
 zipstream-ng changelog
 ======================
 
+### [v1.4.0]
+- The expected size of data added to a `ZipStream` is now validated as it's generated. For unsized
+  `ZipStream`s a mismatch in expected vs. actual size emits a warning, for sized `ZipStream`s a
+  `RuntimeError` is raised.
+- For sized `ZipStream`s, add the option to provide the total size of an iterable when adding it.
+  When the size is provided, the iterable will no longer have to immediately be read into memory to
+  compute it.
+
 ### [v1.3.5]
-- Fix issue where adding data via a generator to an unsized `ZipStream` wouldn't fully implement
+- Fix issue where adding data via an iterable to an unsized `ZipStream` wouldn't fully implement
   Zip64 extensions. This caused some versions of `7z` to emit warnings (but still properly extract
   the data).
 
@@ -51,3 +59,4 @@ zipstream-ng changelog
  [v1.3.3]: https://github.com/pR0Ps/zipstream-ng/compare/v1.3.2...v1.3.3
  [v1.3.4]: https://github.com/pR0Ps/zipstream-ng/compare/v1.3.3...v1.3.4
  [v1.3.5]: https://github.com/pR0Ps/zipstream-ng/compare/v1.3.4...v1.3.5
+ [v1.4.0]: https://github.com/pR0Ps/zipstream-ng/compare/v1.3.5...v1.4.0
