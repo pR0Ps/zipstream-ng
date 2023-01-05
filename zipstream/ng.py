@@ -7,7 +7,6 @@ import datetime
 import functools
 import logging
 import os
-import queue
 import stat
 import struct
 import sys
@@ -423,7 +422,7 @@ def _iter_file(path):
             yield buf
 
 
-class ZipStream(object):
+class ZipStream:
     """A write-only zip that is generated from source files/data as it's
     iterated over.
 
@@ -458,9 +457,10 @@ class ZipStream(object):
             prior to being generated, making it work with the `len()` function.
             Enabling this will enforce two restrictions:
               - No compression can be used
-              - Any iterables added to the stream will immediately be read fully
-                into memory since the size of them needs to be known at the time
-                they are added.
+              - Any iterables added to the stream without also specifying their
+                size (see `.add` docs) will immediately be read fully into
+                memory. This is because the size of the data they will produce
+                must be known prior to the stream being generated.
 
             If `False` (the default), no restrictions are enforced and using the
             object with the `len()` function will not work (will raise a
@@ -649,7 +649,7 @@ class ZipStream(object):
 
     @_validate_final
     @_validate_compression
-    def add(self, data, arcname, *, compress_type=None, compress_level=None):
+    def add(self, data, arcname, *, size=None, compress_type=None, compress_level=None):
         """Queue up data to be added to the ZipStream
 
         `data` can be bytes, a string (encoded to bytes using utf-8), or any
@@ -662,6 +662,10 @@ class ZipStream(object):
         `arcname` (required) is the name of the file to store the data in. If
         any `data` is provided then the `arcname` cannot end with a "/" as this
         would create a directory (which can't contain content).
+
+        `size` (optional) specifies the size of the `data` ONLY in the case
+        where it is an iterator and the ZipStream is sized. It is ignored in
+        all other cases.
 
         Note that the data provided will not be used until the file is actually
         encoded in the ZipStream. This means that strings and bytes will be held
@@ -701,6 +705,7 @@ class ZipStream(object):
         elif hasattr(data, "__iter__"):
             self._enqueue(
                 iterable=data,
+                size=size if self._sized else None,
                 arcname=arcname,
                 compress_type=compress_type,
                 compress_level=compress_level,
@@ -819,6 +824,8 @@ class ZipStream(object):
         """Internal method to enqueue files, data, and iterables to be streamed"""
 
         path = kwargs.get("path")
+        data = kwargs.get("data")
+        size = kwargs.get("size")
 
         # Get the modified time of the added path (use current time for
         # non-paths) and use it to update the last_modified property
@@ -826,29 +833,31 @@ class ZipStream(object):
         if self._last_modified is None or self._last_modified < mtime:
             self._last_modified = mtime
 
+        # Get the expected size of the data where not specified and possible
+        if size is None:
+            if data is not None:
+                kwargs["size"] = len(data)
+            elif path is not None:
+                if os.path.isdir(path):
+                    kwargs["size"] = 0
+                else:
+                    kwargs["size"] = os.path.getsize(path)
+
         # If the ZipStream is sized then it will look at what is being added and
         # queue up some information for _get_size to use to compute the total
         # length of the stream. It will also read any iterables fully into
         # memory so their size is known.
         if self._sized:
-            iterable = kwargs.pop("iterable", None)
-            data = kwargs.get("data")
-
-            assert bool(iterable) ^ bool(data is not None) ^ bool(path)
-
             if kwargs.get("compress_type"):
                 raise ValueError("Cannot use compression with a sized ZipStream")
-            elif data is not None:
-                filesize = len(data)
-            elif iterable:
-                # Iterate the data to get the size and replace it with the static data
-                data = b''.join(iterable)
-                filesize = len(data)
-                kwargs["data"] = data
-            elif path:
-                filesize = os.path.getsize(path)
 
-            self._to_count.append((kwargs["arcname"], filesize))
+            # Iterate the iterable data to get the size and replace it with the static data
+            if path is None and data is None and size is None:
+                data = b''.join(kwargs.pop("iterable"))
+                kwargs["size"] = len(data)
+                kwargs["data"] = data
+
+            self._to_count.append((kwargs["arcname"], kwargs["size"]))
 
         self._queue.append(kwargs)
 
@@ -857,9 +866,10 @@ class ZipStream(object):
         self._pos += len(data)
         return data
 
-    def _gen_file_entry(self, *, path=None, iterable=None, data=None, arcname, compress_type, compress_level):
+    def _gen_file_entry(self, *, path=None, iterable=None, data=None, size=None, arcname, compress_type, compress_level):
         """Yield the zipped data generated by the specified path/iterator/data"""
         assert bool(path) ^ bool(iterable) ^ bool(data is not None)
+        assert not (self._sized and size is None)
 
         if path:
             zinfo = ZipStreamInfo.from_file(path, arcname)
@@ -900,6 +910,25 @@ class ZipStream(object):
         # Generate the file data
         for x in zinfo._file_data(iterable, force_zip64=force_zip64):
             yield self._track(x)
+
+        if size is not None and size != zinfo.file_size:
+            # The size of the data that was stored didn't match what was
+            # expected. Note that this still produces a valid zip file, just
+            # one with a different amount of data than was expected.
+            # If the ZipStream is sized, this will raise an error since the
+            # actual size will no longer match the calculated size.
+            __log__.warning(
+                "Size mismatch when adding data for '%s' (expected %d bytes, got %d)",
+                arcname,
+                size,
+                zinfo.file_size
+            )
+            if self._sized:
+                raise RuntimeError(
+                    "Error adding '{}' to sized ZipStream - "
+                    "actual size did not match the computed size".format(arcname)
+                )
+
         self._filelist.append(zinfo)
 
     def _gen_archive_footer(self):
