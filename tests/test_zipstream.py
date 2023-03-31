@@ -135,6 +135,62 @@ def test_zipstream_compression(caplog, files, ct):
         _verify_zip_contains(zf, f)
 
 
+@pytest.mark.parametrize("ct", [
+    zipfile.ZIP_STORED,
+    zipfile.ZIP_LZMA,
+    zipfile.ZIP_DEFLATED,
+    zipfile.ZIP_BZIP2
+])
+@pytest.mark.parametrize("cl", [None, 2])
+def test_mixed_compression_and_getinfo(ct, cl):
+    """Test that files are compressed using the correct method and level and
+    that the information from get_info accurately reflects this"""
+
+    # Make the test just test compression types on 3.6 and below
+    cl, TEST_CL = (None, None) if PY36 else (cl, 5)
+
+    zs = ZipStream(compress_type=ct, compress_level=cl)
+    zs.add(b"0", arcname="0")
+    zs.add(b"1", arcname="1", compress_type=zipfile.ZIP_STORED)
+    zs.add(b"1c", arcname="1c", compress_type=zipfile.ZIP_STORED, compress_level=TEST_CL)
+    zs.add(b"2", arcname="2", compress_type=zipfile.ZIP_LZMA)
+    zs.add(b"2c", arcname="2c", compress_type=zipfile.ZIP_LZMA, compress_level=TEST_CL)
+    zs.add(b"3", arcname="3", compress_type=zipfile.ZIP_DEFLATED)
+    zs.add(b"3c", arcname="3c", compress_type=zipfile.ZIP_DEFLATED, compress_level=TEST_CL)
+    zs.add(b"4", arcname="4", compress_type=zipfile.ZIP_BZIP2)
+    zs.add(b"4c", arcname="4c", compress_type=zipfile.ZIP_BZIP2, compress_level=TEST_CL)
+
+    zf = _get_zip(zs)
+    zinfos = zf.infolist()
+    fullinfos = zs.get_info()
+    assert len(zinfos) == len(fullinfos) == 9
+
+    def assert_zinfo(idx, name, compress_type, compress_level):
+        zi = zinfos[idx]
+        fi = fullinfos[idx]
+        assert fi["name"] == zi.filename == name
+
+        assert fi["compress_type"] == zi.compress_type == compress_type
+        assert fi["compress_level"] == compress_level
+        assert fi["compressed_size"] == zi.compress_size
+
+        assert zf.read(zi) == name.encode("utf-8")
+
+    # no compression level for stored and lzma
+    if ct in (zipfile.ZIP_STORED, zipfile.ZIP_LZMA):
+        assert_zinfo(0, "0", ct, None)
+    else:
+        assert_zinfo(0, "0", ct, cl)
+    assert_zinfo(1, "1", zipfile.ZIP_STORED, None)
+    assert_zinfo(2, "1c", zipfile.ZIP_STORED, None)
+    assert_zinfo(3, "2", zipfile.ZIP_LZMA, None)
+    assert_zinfo(4, "2c", zipfile.ZIP_LZMA, None)
+    assert_zinfo(5, "3", zipfile.ZIP_DEFLATED, cl)
+    assert_zinfo(6, "3c", zipfile.ZIP_DEFLATED, TEST_CL)
+    assert_zinfo(7, "4", zipfile.ZIP_BZIP2, cl)
+    assert_zinfo(8, "4c", zipfile.ZIP_BZIP2, TEST_CL)
+
+
 @pytest.mark.parametrize("zip64", [False, True])
 def test_zipstream_normal_paths(monkeypatch, files, zip64):
     """Test adding paths and iterating"""
