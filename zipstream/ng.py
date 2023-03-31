@@ -692,7 +692,9 @@ class ZipStream:
             # change while we're iterating over it.
             data = bytes(data)
 
-        if data != b'' and arcname[-1] in PATH_SEPARATORS:
+        # If it is not bytes, it is an iterator. Therfore we can assume it has some content,
+        # as we do not want to iterate over it more than once.
+        if arcname[-1] in PATH_SEPARATORS and (not isinstance(data, bytes) or data != b''):
             raise ValueError("Can't store data as a directory")
 
         if isinstance(data, bytes):
