@@ -593,6 +593,9 @@ class ZipStream:
         if PY35_COMPAT and hasattr(path, "__fspath__"):  # pragma no cover
             path = path.__fspath__()
 
+        if not os.path.exists(path):
+            raise ValueError("Path '{}' not found".format(path))
+
         path = os.path.normpath(path)
 
         if not arcname:
@@ -601,9 +604,6 @@ class ZipStream:
                 raise ValueError(
                     "No arcname for path '{}' could be assumed".format(path)
                 )
-
-        if not os.path.exists(path):
-            raise ValueError("Path '{}' not found".format(path))
 
         # Not recursing - just add the path
         if not recurse or not os.path.isdir(path):
