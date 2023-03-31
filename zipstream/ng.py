@@ -720,6 +720,13 @@ class ZipStream:
                 "Data to add must be str, bytes, or an iterable of bytes"
             )
 
+    def mkdir(self, arcname):
+        """Create a directory inside the ZipStream"""
+        if arcname[-1] not in PATH_SEPARATORS:
+            arcname += "/"
+
+        self.add(data=None, arcname=arcname)
+
     @property
     def sized(self):
         """True if the ZipStream's final size is known"""

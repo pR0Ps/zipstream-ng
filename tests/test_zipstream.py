@@ -398,6 +398,9 @@ def test_adding_windows_paths(monkeypatch):
     zs.add("", "a/b\\")
     zs.add("", "a\\b/")
     zs.add("", "a\\b\\")
+    zs.mkdir("a/b\\")
+    zs.mkdir("a\\b/")
+    zs.mkdir("a\\b\\")
 
     predicted = len(zs)
     actual = len(bytes(zs))
@@ -405,7 +408,7 @@ def test_adding_windows_paths(monkeypatch):
     assert predicted == actual
 
     info = zs.get_info()
-    assert len(info) == 3
+    assert len(info) == 6
     for x in info:
         assert x["name"] == "a/b/"
 
@@ -469,6 +472,32 @@ def test_creating_dirs_with_data():
         assert zinfos[i].compress_size == 0
 
 
+def test_mkdir():
+    zs = ZipStream(sized=True)
+
+    PATHS = (
+        "folder0",  # no trailing slash
+        "folder1",
+        "folder1/sub",  # into existing dir
+        "folder2/sub/sub/sub/",  # new path
+    )
+
+    for p in PATHS:
+        zs.mkdir(p)
+
+    data = bytes(zs)
+    assert len(data) == len(zs)
+
+    zinfos = _get_zip(data).infolist()
+    assert len(zinfos) == 4
+
+    for i, p in enumerate(x.rstrip("/") + "/" for x in PATHS):
+        assert zinfos[i].filename == p
+        assert zinfos[i].is_dir()
+        assert zinfos[i].file_size == 0
+        assert zinfos[i].compress_size == 0
+
+
 def test_directly_adding_empty_dir(tmpdir):
     """Test adding an empty directory"""
     t = tmpdir.mkdir("empty")
@@ -477,7 +506,7 @@ def test_directly_adding_empty_dir(tmpdir):
     data = bytes(zs)
     assert len(data) == len(zs)
 
-    zinfos = sorted(_get_zip(data).infolist(), key=lambda x: x.filename)
+    zinfos = _get_zip(data).infolist()
     assert len(zinfos) == 1
     assert zinfos[0].filename == "empty/"
     assert zinfos[0].is_dir()
