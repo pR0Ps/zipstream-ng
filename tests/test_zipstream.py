@@ -89,8 +89,6 @@ def _assert_equal_zips(z1, z2):
     assert z1.comment == z2.comment
     z1i = sorted(z1.infolist(), key=lambda x: x.filename)
     z2i = sorted(z2.infolist(), key=lambda x: x.filename)
-    print(z1i)
-    print(z2i)
     assert len(z1i) == len(z2i)
     for x1, x2, in zip(z1i, z2i):
         assert x1.filename == x2.filename
@@ -526,7 +524,9 @@ def test_adding_data(caplog, data, ct):
         data = b''.join(data)
 
     # Test arcname is required
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="An arcname to store the data in is required"):
+        zs.add(tostore, None)
+    with pytest.raises(ValueError, match="An arcname to store the data in is required"):
         zs.add(tostore, "")
 
     zs.add(tostore, "data.bin")
@@ -618,6 +618,16 @@ def test_adding_deleted_path(tmpdir):
 
     with pytest.raises(FileNotFoundError):
         bytes(zs)
+
+
+def test_adding_empty_name(tmpdir, monkeypatch):
+    """Test that when trying to discover an arcname for a path empty names raise an error"""
+    monkeypatch.setattr(os.path, "basename", lambda _: "")
+    zs = ZipStream(sized=True)
+    with pytest.raises(ValueError, match="No arcname for path"):
+        zs.add_path(tmpdir)
+    with pytest.raises(ValueError, match="No arcname for path"):
+        zs.add_path(tmpdir, arcname="")
 
 
 @pytest.mark.parametrize("data", [

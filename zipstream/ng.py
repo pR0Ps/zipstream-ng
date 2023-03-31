@@ -568,7 +568,7 @@ class ZipStream:
 
         Queues the `path` up to to be written to the archive, giving it the name
         provided by `arcname`. If `arcname` is not provided, it is assumed to be
-        the last component of the `path` (Ex: "/path/to/files/" --> "files")
+        the last component of the `path` (Ex: "/path/to/files/" --> "files").
 
         If `recurse` is `True` (the default), and the `path` is a directory, all
         files and folders under the `path` will be added to ZipStream. Symlinks
@@ -585,7 +585,8 @@ class ZipStream:
         If given, `compress_type` and `compress_level` override the settings the
         ZipStream was initialized with.
 
-        Raises a ValueError if the path does not exist.
+        Raises a ValueError if the path does not exist or an arcname isn't
+        provided and the assumed one is empty.
         Raises a RuntimeError if the ZipStream has already been finalized.
         """
         # Resolve path objects to strings on Python 3.5
@@ -596,6 +597,10 @@ class ZipStream:
 
         if not arcname:
             arcname = os.path.basename(path)
+            if not arcname:
+                raise ValueError(
+                    "No arcname for path '{}' could be assumed".format(path)
+                )
 
         if not os.path.exists(path):
             raise ValueError("Path '{}' not found".format(path))
@@ -681,7 +686,7 @@ class ZipStream:
         Raises a RuntimeError if the ZipStream has already been finalized.
         """
         if not arcname:
-            raise ValueError("A filename to store the data in is required")
+            raise ValueError("An arcname to store the data in is required")
 
         if data is None:
             data = b''
