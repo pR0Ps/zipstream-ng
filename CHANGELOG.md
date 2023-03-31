@@ -1,6 +1,14 @@
 zipstream-ng changelog
 ======================
 
+### [v1.5.0]
+- Add `ZipStream.mkdir` method to make an empty directory inside the stream.
+- Fix an issue where `ZipStream.get_info` would return incorrect values for `compress_level` in
+  cases where the compression level was specified, but had no effect (ie. when using
+  `ZIP_STORED`/`ZIP_LZMA`).
+- Fix an edge case where top-level paths like `/` could be added with an empty arcname.
+- Improve error messages for adding data as a directory and adding nonexistent paths.
+
 ### [v1.4.0]
 - The expected size of data added to a `ZipStream` is now validated as it's generated. For unsized
   `ZipStream`s a mismatch in expected vs. actual size emits a warning, for sized `ZipStream`s a
@@ -60,3 +68,4 @@ zipstream-ng changelog
  [v1.3.4]: https://github.com/pR0Ps/zipstream-ng/compare/v1.3.3...v1.3.4
  [v1.3.5]: https://github.com/pR0Ps/zipstream-ng/compare/v1.3.4...v1.3.5
  [v1.4.0]: https://github.com/pR0Ps/zipstream-ng/compare/v1.3.5...v1.4.0
+ [v1.5.0]: https://github.com/pR0Ps/zipstream-ng/compare/v1.4.0...v1.5.0
