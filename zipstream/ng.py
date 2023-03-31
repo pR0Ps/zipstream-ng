@@ -122,7 +122,7 @@ class ZipStreamInfo(ZipInfo):
         # streamable
         return struct.pack(
             "<4sLQQ" if zip64 else "<4sLLL",
-            b'PK\x07\x08',  # Data descriptor signature
+            b"PK\x07\x08",  # Data descriptor signature
             self.CRC,
             self.compress_size,
             self.file_size
@@ -301,7 +301,7 @@ class ZipStreamInfo(ZipInfo):
             # ZipStreamInfo records, there shouldn't ever be any so we don't
             # bother.
             extra_data = struct.pack(
-                '<HH' + 'Q'*len(extra), 1, 8*len(extra), *extra
+                "<HH" + "Q"*len(extra), 1, 8*len(extra), *extra
             ) + extra_data
             min_version = ZIP64_VERSION
 
@@ -414,7 +414,7 @@ def _validate_compression(func):
 
 def _iter_file(path):
     """Yield data from a file"""
-    with open(path, 'rb') as fp:
+    with open(path, "rb") as fp:
         while True:
             buf = fp.read(READ_BUFFER)
             if not buf:
@@ -511,7 +511,7 @@ class ZipStream:
 
     def __bytes__(self):
         """Get the bytes of the ZipStream"""
-        return b''.join(self)
+        return b"".join(self)
 
     def file(self):
         """Generate data for a single file being added to the ZipStream
@@ -689,7 +689,7 @@ class ZipStream:
             raise ValueError("An arcname to store the data in is required")
 
         if data is None:
-            data = b''
+            data = b""
         elif isinstance(data, str):
             data = data.encode("utf-8")
         elif isinstance(data, bytearray):
@@ -762,7 +762,7 @@ class ZipStream:
         Raises a RuntimeError if the ZipStream has already been finalized.
         """
         if comment is None:
-            comment = b''
+            comment = b""
         elif isinstance(comment, str):
             comment = comment.encode("utf-8")
         elif isinstance(comment, bytearray):
@@ -870,7 +870,7 @@ class ZipStream:
 
             # Iterate the iterable data to get the size and replace it with the static data
             if path is None and data is None and size is None:
-                data = b''.join(kwargs.pop("iterable"))
+                data = b"".join(kwargs.pop("iterable"))
                 kwargs["size"] = len(data)
                 kwargs["data"] = data
 

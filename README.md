@@ -115,8 +115,8 @@ from zipstream import ZipStream
 
 app = Flask(__name__)
 
-@app.route('/', defaults={'path': '.'})
-@app.route('/<path:path>')
+@app.route("/", defaults={"path": "."})
+@app.route("/<path:path>")
 def stream_zip(path):
     name = os.path.basename(os.path.abspath(path))
     zs = ZipStream.from_path(path)
@@ -131,7 +131,7 @@ def stream_zip(path):
     )
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host="0.0.0.0", port=5000)
 ```
 
 
@@ -217,7 +217,7 @@ def iter_files(path):
             yield os.path.join(dirpath, f)
 
 def read_file(path):
-    with open(path, 'rb') as fp:
+    with open(path, "rb") as fp:
         while True:
             buf = fp.read(1024 * 64)
             if not buf:
@@ -226,7 +226,7 @@ def read_file(path):
 
 def generate_zipstream(path):
     stream = Stream()
-    with ZipFile(stream, mode='w') as zf:
+    with ZipFile(stream, mode="w") as zf:
         toplevel = os.path.basename(os.path.normpath(path))
         for f in iter_files(path):
             # Use the basename of the path to set the arcname
@@ -234,7 +234,7 @@ def generate_zipstream(path):
             zinfo = ZipInfo.from_file(f, arcname)
 
             # Write data to the zip file then yield the stream content
-            with zf.open(zinfo, mode='w') as fp:
+            with zf.open(zinfo, mode="w") as fp:
                 if zinfo.is_dir():
                     continue
                 for buf in read_file(f):

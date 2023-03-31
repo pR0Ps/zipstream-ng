@@ -64,13 +64,13 @@ def files(tmp_path_factory):
 def _randbytes(n):
     # Backported from Python 3.9
     if not n:
-        return b''
-    return random.getrandbits(n * 8).to_bytes(n, 'little')
+        return b""
+    return random.getrandbits(n * 8).to_bytes(n, "little")
 
 def _get_zip(data):
     if not isinstance(data, io.IOBase):
         if not isinstance(data, (bytes, bytearray)):
-            data = b''.join(data)
+            data = b"".join(data)
         data = io.BytesIO(data)
 
     return zipfile.ZipFile(data)
@@ -229,7 +229,7 @@ def test_zipstream_all_then_footer_paths(files):
 def test_per_file_iteration(files):
     """Test iterating per-file while adding files works"""
     zs = ZipStream()
-    data = b''
+    data = b""
     assert zs.num_streamed() == 0
     assert zs.num_queued() == 0
     assert zs.is_empty()
@@ -241,12 +241,12 @@ def test_per_file_iteration(files):
     assert zs.num_queued() == 3
     assert not zs.is_empty()
     assert zs
-    data += b''.join(zs.file())
+    data += b"".join(zs.file())
     assert zs.num_streamed() == 1
     assert zs.num_queued() == 2
     assert not zs.is_empty()
     assert zs
-    data += b''.join(zs.all_files())
+    data += b"".join(zs.all_files())
     assert zs.num_streamed() == 3
     assert zs.num_queued() == 0
     assert not zs.is_empty()
@@ -256,7 +256,7 @@ def test_per_file_iteration(files):
     assert zs.num_queued() == 1
     assert not zs.is_empty()
     assert zs
-    data += b''.join(zs.finalize())
+    data += b"".join(zs.finalize())
     assert zs.num_streamed() == 4
     assert zs.num_queued() == 0
     assert not zs.is_empty()
@@ -458,7 +458,7 @@ def test_creating_dirs_with_data():
     """Test creating directories works except when adding data to them"""
     zs = ZipStream()
     zs.add(None, "folder0/")
-    zs.add(b'', "folder1/")
+    zs.add(b"", "folder1/")
     zs.add("", "folder2/")
     with pytest.raises(ValueError):
         zs.add("data", "folder3/")
@@ -518,7 +518,7 @@ def test_adding_local_dir(tmpdir):
     """Test adding files/folder from the local directory doesn't include the directory name of ."""
     t = tmpdir.mkdir("top")
     t.mkdir("empty")
-    t.mkdir("not_empty").join("file.txt").write(b'x')
+    t.mkdir("not_empty").join("file.txt").write(b"x")
 
     os.chdir(str(t))
 
@@ -543,7 +543,7 @@ def test_empty_folders_preserved_recursive(tmpdir):
     """Test that recursively adding a directory preserves empty files and folders in it"""
     t = tmpdir.mkdir("top")
     t.mkdir("empty")
-    t.join("file.txt").write(b'')
+    t.join("file.txt").write(b"")
 
     zs = ZipStream.from_path(t)
 
@@ -568,7 +568,7 @@ def test_recursion_disable(tmpdir):
     """Test that recursion can be disabled to just add a single (empty) folder"""
     t = tmpdir.mkdir("top")
     t.mkdir("empty")
-    t.join("file.txt").write(b'')
+    t.join("file.txt").write(b"")
 
     zinfos = _get_zip(ZipStream.from_path(t, recurse=False)).infolist()
 
@@ -581,9 +581,9 @@ def test_recursion_disable(tmpdir):
 
 @pytest.mark.parametrize("data", [
     "this is a string",
-    b'these are some bytes',
-    bytearray(b'this is a bytearray'),
-    [b'a', b'list', b'of', b'bytes'],
+    b"these are some bytes",
+    bytearray(b"this is a bytearray"),
+    [b"a", b"list", b"of", b"bytes"],
     _gen_rand()
 ])
 @pytest.mark.parametrize("ct", [
@@ -606,7 +606,7 @@ def test_adding_data(caplog, data, ct):
         # tee the iterator and get the contents from it so they can be checked
         # against what's put into the stream
         tostore, data = itertools.tee(data)
-        data = b''.join(data)
+        data = b"".join(data)
 
     # Test arcname is required
     with pytest.raises(ValueError, match="An arcname to store the data in is required"):
@@ -751,7 +751,7 @@ def test_adding_iterator_invalid_size(caplog, sized, size):
     """Make sure errors are raised when generating if an incorrect iterator size was provided"""
     caplog.set_level(logging.WARNING)
 
-    l_rand = len(b''.join(_gen_rand()))
+    l_rand = len(b"".join(_gen_rand()))
 
     zs = ZipStream(sized=sized)
     zs.add(_gen_rand(), "rand.txt", size=size)
@@ -786,7 +786,7 @@ def test_adding_comment(caplog):
     zs.comment = bytearray(b"test")
     assert zs.comment == "test".encode("utf-8")
 
-    c = b'this is a test with a big comment' + bytes(zipfile.ZIP_MAX_COMMENT)
+    c = b"this is a test with a big comment" + bytes(zipfile.ZIP_MAX_COMMENT)
     l = len(c)
     assert "too long" not in caplog.text
     zs.comment = c
@@ -815,17 +815,17 @@ def test_finalizing():
     assert zs._final
 
     # Doesn't finalize if just asking for file data
-    data = b''
+    data = b""
     zs = ZipStream()
     zs.add("", "a")
-    data += b''.join(zs.file())
+    data += b"".join(zs.file())
     assert not zs._final
-    data += b''.join(zs.file())
+    data += b"".join(zs.file())
     assert not zs._final
     zs.add("", "b")
-    data += b''.join(zs.all_files())
+    data += b"".join(zs.all_files())
     assert not zs._final
-    data += b''.join(zs.footer())
+    data += b"".join(zs.footer())
     assert zs._final
     _get_zip(data)
 
@@ -949,7 +949,7 @@ def test_get_info(monkeypatch):
     zs.add(b"test", "text2.txt")
     assert zs.num_queued() == 3
     assert len(zs.get_info()) == 0
-    data += b''.join(zs.all_files())
+    data += b"".join(zs.all_files())
     assert zs.num_queued() == 0
     info = zs.get_info()
     assert len(info) == 3
@@ -1031,7 +1031,7 @@ def test_readme_stdlib_comparison(tmpdir):
                 yield os.path.join(dirpath, f)
 
     def read_file(path):
-        with open(path, 'rb') as fp:
+        with open(path, "rb") as fp:
             while True:
                 buf = fp.read(1024 * 64)
                 if not buf:
@@ -1040,7 +1040,7 @@ def test_readme_stdlib_comparison(tmpdir):
 
     def generate_zipstream(path):
         stream = Stream()
-        with ZipFile(stream, mode='w') as zf:
+        with ZipFile(stream, mode="w") as zf:
             toplevel = os.path.basename(os.path.normpath(path))
             for f in iter_files(path):
                 # Use the basename of the path to set the arcname
@@ -1048,7 +1048,7 @@ def test_readme_stdlib_comparison(tmpdir):
                 zinfo = ZipInfo.from_file(f, arcname)
 
                 # Write data to the zip file then yield the stream content
-                with zf.open(zinfo, mode='w') as fp:
+                with zf.open(zinfo, mode="w") as fp:
                     if zinfo.is_dir():
                         continue
                     for buf in read_file(f):
@@ -1059,21 +1059,21 @@ def test_readme_stdlib_comparison(tmpdir):
     # Create directory structure
     t = tmpdir.mkdir("top")
     t.mkdir("empty")
-    t.join("empty.txt").write('')
-    t.join("test.txt").write('test')
+    t.join("empty.txt").write("")
+    t.join("test.txt").write("test")
     f = t.mkdir("filled")
-    f.join("file.bin").write_binary(b'\x00\x01\xFF')
+    f.join("file.bin").write_binary(b"\x00\x01\xFF")
 
     # Can't make symlinks on some platforms
     if hasattr(t, "mksymlinkto"):
-        f.join("file2.bin").mksymlinkto('file.bin')
+        f.join("file2.bin").mksymlinkto("file.bin")
 
         o = tmpdir.mkdir("othertop")
-        o.join("other.txt").write('other')
-        f.join("notevil").mksymlinkto('../../othertop')
+        o.join("other.txt").write("other")
+        f.join("notevil").mksymlinkto("../../othertop")
 
         # TODO: make stdlib version handle infinte loops
-        #f.join("evil").mksymlinkto('../')
+        #f.join("evil").mksymlinkto("../")
 
     _assert_equal_zips(
         _get_zip(generate_zipstream(t)),
@@ -1143,7 +1143,7 @@ def test_adding_iterator_sized(sized, known_size):
         yield from _gen_rand()
         read = True
 
-    l_rand = len(b''.join(_gen_rand()))
+    l_rand = len(b"".join(_gen_rand()))
 
     zs = ZipStream(sized=sized)
     zs.add(_my_iter(), "rand.txt", size=None if not known_size else l_rand)
@@ -1266,7 +1266,7 @@ def test_zip64_real(tmpdir):
     smalldata = _randbytes(datasize)
 
     # Write large file
-    with open(str(large_file), 'wb') as fp:
+    with open(str(large_file), "wb") as fp:
         fp.write(startdata)
         fp.seek(zipfile.ZIP64_LIMIT, io.SEEK_CUR)
         fp.write(enddata)
@@ -1279,19 +1279,19 @@ def test_zip64_real(tmpdir):
     calculated = len(zs)
 
     l = 0
-    with open(str(zip_file), 'wb') as fp:
+    with open(str(zip_file), "wb") as fp:
         for chunk in zs:
             l += len(chunk)
             fp.write(chunk)
 
     assert l == calculated
 
-    with zipfile.ZipFile(str(zip_file), 'r') as zf:
+    with zipfile.ZipFile(str(zip_file), "r") as zf:
         zinfos = zf.infolist()
         assert len(zinfos) == 2
 
         # Read the data and make sure it's the same as what was put in
-        with zf.open("large.bin", 'r') as fp:
+        with zf.open("large.bin", "r") as fp:
             assert startdata == fp.read(datasize)
             if PY36:
                 # No support for seeking <3.7 - read it all in 128MB chunks
@@ -1304,5 +1304,5 @@ def test_zip64_real(tmpdir):
                 fp.seek(zipfile.ZIP64_LIMIT, io.SEEK_CUR)
             assert enddata == fp.read()
 
-        with zf.open("small.bin", 'r') as fp:
+        with zf.open("small.bin", "r") as fp:
             assert smalldata == fp.read()
