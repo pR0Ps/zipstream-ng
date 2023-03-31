@@ -613,6 +613,8 @@ def test_adding_data(caplog, data, ct):
         zs.add(tostore, None)
     with pytest.raises(ValueError, match="An arcname to store the data in is required"):
         zs.add(tostore, "")
+    with pytest.raises(ValueError, match="Can't store .* as a directory"):
+        zs.add(tostore, "directory/")
 
     zs.add(tostore, "data.bin")
     zf = _get_zip(zs)

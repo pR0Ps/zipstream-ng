@@ -681,7 +681,7 @@ class ZipStream:
         ZipStream was initialized with.
 
         Raises a ValueError if an arcname is not provided or ends with a "/"
-        when data id given.
+        when data is given.
         Raises a TypeError if the data is not str, bytes, or an iterator.
         Raises a RuntimeError if the ZipStream has already been finalized.
         """
@@ -697,10 +697,12 @@ class ZipStream:
             # change while we're iterating over it.
             data = bytes(data)
 
-        if data != b'' and arcname[-1] in PATH_SEPARATORS:
-            raise ValueError("Can't store data as a directory")
+        is_directory = arcname[-1] in PATH_SEPARATORS
 
         if isinstance(data, bytes):
+            if is_directory and data:
+                raise ValueError("Can't store data as a directory")
+
             self._enqueue(
                 data=data,
                 arcname=arcname,
@@ -708,6 +710,9 @@ class ZipStream:
                 compress_level=compress_level,
             )
         elif hasattr(data, "__iter__"):
+            if is_directory:
+                raise ValueError("Can't store an iterable as a directory")
+
             self._enqueue(
                 iterable=data,
                 size=size if self._sized else None,
