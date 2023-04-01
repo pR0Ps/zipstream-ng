@@ -261,9 +261,13 @@ class ZipStreamInfo(ZipInfo):
         self.file_size = file_size
         self.compress_size = compress_size
 
-        if not zip64 and max(file_size, compress_size) > ZIP64_LIMIT:  # pragma: no cover
+        if not zip64 and max(file_size, compress_size) > ZIP64_LIMIT:
             # Didn't estimate correctly :(
-            raise RuntimeError("Adding file unexpectedly required using Zip64")
+            raise RuntimeError(
+                "Adding file '{}' unexpectedly required using Zip64 extensions".format(
+                    self.filename
+                )
+            )
 
         # Yield the data descriptor with the now-valid CRC and file size info
         yield self.DataDescriptor(zip64)
@@ -669,8 +673,7 @@ class ZipStream:
         would create a directory (which can't contain content).
 
         `size` (optional) specifies the size of the `data` ONLY in the case
-        where it is an iterator and the ZipStream is sized. It is ignored in
-        all other cases.
+        where it is an iterator. It is ignored in all other cases.
 
         Note that the data provided will not be used until the file is actually
         encoded in the ZipStream. This means that strings and bytes will be held
@@ -715,7 +718,7 @@ class ZipStream:
 
             self._enqueue(
                 iterable=data,
-                size=size if self._sized else None,
+                size=size,
                 arcname=arcname,
                 compress_type=compress_type,
                 compress_level=compress_level,
@@ -907,6 +910,8 @@ class ZipStream:
 
             if data is not None:
                 zinfo.file_size = len(data)
+            elif size is not None:
+                zinfo.file_size = size
 
         zinfo.compress_type = compress_type if compress_type is not None else self._compress_type
         if not PY36_COMPAT:
@@ -919,9 +924,9 @@ class ZipStream:
         # Store the position of the header
         zinfo.header_offset = self._pos
 
-        # We need to force using zip64 extensions for iterables since we don't
-        # know how big they'll end up being.
-        force_zip64 = bool(iterable)
+        # We need to force using zip64 extensions for unsized iterables since
+        # we don't know how big they'll end up being.
+        force_zip64 = bool(iterable) and size is None
 
         # Convert paths and data into iterables
         if path:

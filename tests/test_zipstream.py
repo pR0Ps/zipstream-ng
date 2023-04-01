@@ -760,10 +760,55 @@ def test_adding_iterator_invalid_size(caplog, sized, size):
     if sized and size is not None:
         with pytest.raises(RuntimeError, match="Error adding 'rand.txt' to sized ZipStream"):
             bytes(zs)
-        assert "Size mismatch when adding data for 'rand.txt'" in caplog.text
     else:
         bytes(zs)
-        assert "Size mismatch" not in caplog.text
+
+    # only emits a warning when size was specfied
+    assert (size is not None) == ("Size mismatch when adding data for 'rand.txt'" in caplog.text)
+
+
+def test_adding_iterator_invalid_size_underestimate_zip64(monkeypatch):
+    """Make sure that if an iterator size that doesn't require zip64 is given
+    and the data from it does, a RuntimeError is raised"""
+    monkeypatch.setattr(zipfile, "ZIP64_LIMIT", 100)
+    monkeypatch.setattr(zipstream.ng, "ZIP64_LIMIT", 100)
+
+    zs = ZipStream(sized=False)
+    zs.add(_gen_rand(), "rand.txt", size=1)
+
+    with pytest.raises(RuntimeError, match="Adding file 'rand.txt' unexpectedly required using Zip64 extensions"):
+        bytes(zs)
+
+
+def test_underestimate_zip64_via_compression(monkeypatch):
+    """Test that underestimating compresed size raises a RuntimeError"""
+
+    # compressed data can be bigger than uncompressed data. This generally only
+    # happens with small amounts of data but can with large amounts of data as
+    # well. This is less of a test and more of a demonstration of why the
+    # estimation factor is needed
+    monkeypatch.setattr(zipfile, "ZIP64_LIMIT", 10)
+    monkeypatch.setattr(zipstream.ng, "ZIP64_LIMIT", 10)
+
+    ZEROS = "0" * 10
+    NUMS = "0123456789"
+
+    def _make_zip(content):
+        zs = ZipStream(compress_type=zipfile.ZIP_DEFLATED)
+        zs.add(content, "file.txt")
+        bytes(zs)
+
+    assert len(ZEROS) == len(NUMS)
+
+    _make_zip(ZEROS)
+    _make_zip(NUMS)
+
+    # remove overestimation
+    monkeypatch.setattr(zipstream.ng, "ZIP64_ESTIMATE_FACTOR", 1)
+
+    _make_zip(ZEROS)
+    with pytest.raises(RuntimeError, match="Adding file 'file.txt' unexpectedly required using Zip64 extensions"):
+        _make_zip(NUMS)
 
 
 def test_adding_comment(caplog):
@@ -1111,21 +1156,28 @@ def test_unsized_zipstream_len_typeerror():
 
 @pytest.mark.parametrize("zip64", [False, True])
 @pytest.mark.parametrize("sized", [False, True])
-def test_proper_zip64_min_version(monkeypatch, zip64, sized):
-    """Ensure that the min version is set properly"""
+@pytest.mark.parametrize("known_size", [False, True])
+def test_proper_zip64_min_version(monkeypatch, zip64, sized, known_size):
+    """Ensure that the zip64 extensions are used when needed and the min
+    version is set accordingly
+    """
     if zip64:
         monkeypatch.setattr(zipfile, "ZIP64_LIMIT", 100)
         monkeypatch.setattr(zipstream.ng, "ZIP64_LIMIT", 100)
 
     zs = ZipStream(sized=sized)
-    zs.add(_gen_rand(), "rand.txt")
+    size = None if not known_size else len(b"".join(_gen_rand()))
+
+    zs.add(_gen_rand(), "rand.txt", size=size)
 
     zi = _get_zip(zs).infolist()[0]
-    # A sized zipstream will pull the entire iterator into memory and realize
-    # that zip64 is not required.
+    # A sized zipstream will always pull the entire iterator into memory and
+    # realize that zip64 is not required. Likewise if the size of the iterator
+    # is known.
     # An unsized zipstream will not pull it into memory and be forced to use
-    # zip64 extensions since the size could be too big
-    expected_version = (zipfile.DEFAULT_VERSION if sized and not zip64 else zipfile.ZIP64_VERSION)
+    # zip64 extensions if the size of the iterator is unknown since the size
+    # could be too big.
+    expected_version = (zipfile.DEFAULT_VERSION if not zip64 and (sized or known_size) else zipfile.ZIP64_VERSION)
 
     assert zi.create_version == expected_version
     assert zi.extract_version == expected_version
