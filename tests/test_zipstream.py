@@ -582,6 +582,93 @@ def test_recursion_disable(tmpdir):
     assert zinfos[0].compress_size == 0
 
 
+@pytest.mark.parametrize("preserve_empty", [True, False])
+@pytest.mark.parametrize("followlinks", [True, False])
+def test_zipstream_walk(tmpdir, preserve_empty, followlinks):
+    """Test the zipstream's walk walks the walk it talks"""
+
+    # Create directory structure
+    t = tmpdir.mkdir("top")
+    t.mkdir("empty")
+    t.join("empty.txt").write("")
+    t.join("test.txt").write("test")
+    f = t.mkdir("filled")
+    f.join("file.bin").write_binary(b"\x00\x01\xFF")
+
+    # Can't make symlinks on some platforms
+    symlink_support = hasattr(t, "mksymlinkto")
+    if symlink_support:
+        f.join("file2.bin").mksymlinkto("file.bin")
+
+        o = tmpdir.mkdir("othertop")
+        o.join("other.txt").write("other")
+        f.join("notevil").mksymlinkto("../../othertop")
+        f.join("evil").mksymlinkto("../")
+
+    def walk(path):
+        yield from zipstream.walk(
+            path,
+            preserve_empty=preserve_empty,
+            followlinks=followlinks
+        )
+
+    zs = ZipStream.from_path(t, recurse=walk)
+    data = bytes(zs)
+    assert len(data) == len(zs)
+
+    contents = {
+        x.filename: x.is_dir()
+        for x in _get_zip(data).infolist()
+    }
+
+    for name, is_dir in contents.items():
+        assert (name == "top/empty/") == is_dir
+
+    names = set(contents)
+    assert "top/empty.txt" in names
+    assert symlink_support == ("top/filled/file2.bin" in names)
+    assert "top/filled/file.bin" in names
+    assert "top/test.txt" in names
+    assert preserve_empty == ("top/empty/" in names)
+    assert (symlink_support and followlinks) == ("top/filled/notevil/other.txt" in names)
+
+
+def test_custom_walk(tmpdir):
+    """Test that custom walk functions are supported"""
+
+    t = tmpdir.mkdir("top")
+    t.join("1.txt").write("1")
+    t.join("2.txt").write("22")
+    t.join("3.bin").write("333")
+    t.join("4.txt").write("4444")
+    t.join("5.txt").write("55555")
+    t.mkdir("empty")
+
+    def custom_walk(path):
+        for dirpath, dirnames, files in os.walk(path):
+            for f in files:
+                if f.endswith(".bin"):
+                    continue
+                fullpath = os.path.join(dirpath, f)
+                if os.path.getsize(fullpath) > 4:
+                    continue
+                yield fullpath
+
+            if not files and not dirnames:
+                yield dirpath  # no trailing pathsep
+
+    zs = ZipStream.from_path(t, recurse=custom_walk)
+    data = bytes(zs)
+    assert len(data) == len(zs)
+    zf = _get_zip(data)
+    assert zf.getinfo("top/empty/").is_dir()
+
+    names = sorted(x.filename for x in zf.infolist())
+    assert len(names) == 4
+    assert "top/3.bin" not in names
+    assert "top/5.txt" not in names
+
+
 @pytest.mark.parametrize("data", [
     "this is a string",
     b"these are some bytes",

@@ -60,6 +60,8 @@ __all__ = [
     "ZipStream", "ZipStreamInfo",
     # Compression constants (imported from zipfile)
     "ZIP_STORED", "ZIP_DEFLATED", "BZIP2_VERSION", "ZIP_BZIP2", "LZMA_VERSION", "ZIP_LZMA",
+    # Helper functions
+    "walk"
 ]
 
 __log__ = logging.getLogger(__name__)
@@ -451,6 +453,47 @@ def _iter_file(path):
             yield buf
 
 
+def walk(path, preserve_empty=True, followlinks=True):
+    """Recursively walk the given the path and yield files/folders under it.
+
+    preserve_empty:
+        If True (the default), empty directories will be included in the
+        output. The paths of these directories will be yielded with a trailing
+        path separator.
+
+    followlinks:
+        If True (the default), symlinks to folders will be resolved and
+        followed unless this would result in infinite recursion (symlinks to
+        files are always resolved)
+    """
+
+    # Define a function to return the device and inode for a path.
+    # Will be used to deduplicate folders to avoid infinite recursion
+    def _getkey(path):
+        st = os.stat(path)
+        return (st.st_dev, st.st_ino)
+
+    visited = {_getkey(path)}
+    for dirpath, dirnames, files in os.walk(path, followlinks=followlinks):
+
+        if followlinks:
+            # Prevent infinite recursion by removing previously-visited
+            # directories from dirnames.
+            for i in reversed(range(len(dirnames))):
+                k = _getkey(os.path.join(dirpath, dirnames[i]))
+                if k in visited:
+                    dirnames.pop(i)
+                else:
+                    visited.add(k)
+
+        # Preserve empty directories
+        if preserve_empty and not files and not dirnames:
+            files = [""]
+
+        for f in files:
+            yield os.path.join(dirpath, f)
+
+
 class ZipStream:
     """A write-only zip that is generated from source files/data as it's
     iterated over.
@@ -595,24 +638,28 @@ class ZipStream:
     def add_path(self, path, arcname=None, *, recurse=True, compress_type=None, compress_level=None):
         """Queue up a path to be added to the ZipStream
 
-        Queues the `path` up to to be written to the archive, giving it the name
-        provided by `arcname`. If `arcname` is not provided, it is assumed to be
-        the last component of the `path` (Ex: "/path/to/files/" --> "files").
+        Queues the `path` up to to be written to the archive, giving it the
+        name provided by `arcname`. If `arcname` is not provided, it is assumed
+        to be the last component of the `path` (Ex: "/path/to/files/" -->
+        "files").
 
-        If `recurse` is `True` (the default), and the `path` is a directory, all
-        files and folders under the `path` will be added to ZipStream. Symlinks
-        to files and folders will be resolved and followed unless this would
-        result in infinite recursion.
+        if `recurse` is `True` (the default), and the `path` is a directory,
+        all contents under the `path` will also be added. By default, this is
+        done using the `walk` function in this module, which will preserve
+        empty directories as well as follow symlinks to files and folders
+        unless this would result in infinite recursion.
+
+        If more control over directory walking is required, a function that
+        takes a `path` and returns an iterable of paths can also be passed in
+        as `recurse`. Alternatively, the directory can be walked in external
+        code while calling `add_path(path, arcname, recurse=False)` for each
+        discovered entry.
 
         If recurse is `False`, only the specified path (file or directory) will
         be added.
 
-        If more control over directory walking is required, walk the directory
-        normally and call `add_path(path, arcname, recurse=False)` for each
-        discovered path.
-
-        If given, `compress_type` and `compress_level` override the settings the
-        ZipStream was initialized with.
+        If given, `compress_type` and `compress_level` override the settings
+        the ZipStream was initialized with.
 
         Raises a FileNotFoundError if the path does not exist
         Raises a ValueError if an arcname isn't provided and the assumed
@@ -647,42 +694,30 @@ class ZipStream:
             )
             return
 
-        # Define a function to return the device and inode for a path.
-        # Will be used to deduplicate folders to avoid infinite recursion
-        def _getkey(path):
-            s = os.stat(path)
-            return (s.st_dev, s.st_ino)
+        if recurse is True:
+            recurse = walk
 
-        visited = {_getkey(path)}
-        for dirpath, dirnames, files in os.walk(path, followlinks=True):
+        for filepath in recurse(path):
+            filename = os.path.relpath(filepath, path)
+            filearcname = os.path.normpath(os.path.join(arcname, filename))
 
-            # Prevent infinite recursion by removing previously-visited
-            # directories from dirnames.
-            for i in reversed(range(len(dirnames))):
-                k = _getkey(os.path.join(dirpath, dirnames[i]))
-                if k in visited:
-                    dirnames.pop(i)
-                else:
-                    visited.add(k)
+            # Check if adding a directory, and if so, add a trailing slash
+            # (normpath will remove it). Also set the size since we're doing
+            # the stat anyway
+            st = os.stat(filepath)
+            if stat.S_ISDIR(st.st_mode):
+                filearcname += "/"
+                size = 0
+            else:
+                size = st.st_size
 
-            # Preserve empty directories
-            if not files and not dirnames:
-                files = [""]
-
-            for f in files:
-                filepath = os.path.join(dirpath, f)
-                filename = os.path.relpath(filepath, path)
-                filearcname = os.path.normpath(os.path.join(arcname, filename))
-                if not f:
-                    # adding an empty directory - make sure it has a trailing slash
-                    filearcname += "/"
-
-                self._enqueue(
-                    path=filepath,
-                    arcname=filearcname,
-                    compress_type=compress_type,
-                    compress_level=compress_level
-                )
+            self._enqueue(
+                path=filepath,
+                arcname=filearcname,
+                size=size,
+                compress_type=compress_type,
+                compress_level=compress_level
+            )
 
     @_validate_final
     @_validate_compression
