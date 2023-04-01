@@ -1250,7 +1250,7 @@ def test_sized_zipstream_size_while_adding(monkeypatch, files, zip64):
         _verify_zip_contains(zf, f)
 
 
-# Warning: skippped because it creates a 4GB+ temp file
+# Warning: skipped because it creates a 4GB+ temp file
 @pytest.mark.skip
 def test_zip64_real(tmpdir):
     """Test compressing a large file using Zip64 extensions works"""

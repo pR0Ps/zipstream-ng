@@ -80,7 +80,7 @@ zs.add(random_data(), "random.bin")
 zs.add("This is some text", "README.txt")
 
 # Write out the zip file as it's being generated.
-# At this point the data in the files files will be read in and the generator
+# At this point the data in the files will be read in and the generator
 # will be iterated over.
 with open("files.zip", "wb") as f:
     f.writelines(zs)
