@@ -416,6 +416,30 @@ def _validate_compression(func):
     return wrapper
 
 
+def _sanitize_arcname(arcname):
+    """Terminate the arcname at the first null byte"""
+    # based on zipfile._sanitize_filename
+
+    if arcname:
+        # trim the arcname to the first null byte
+        null_byte = arcname.find(chr(0))
+        if null_byte >= 0:
+            arcname = arcname[:null_byte]
+
+    if not arcname:
+        raise ValueError(
+            "A valid arcname (name of the entry in the zip file) is required"
+        )
+
+    # Ensure paths in the zip always use forward slashes as the directory
+    # separator
+    for sep in PATH_SEPARATORS:
+        if sep != "/":
+            arcname = arcname.replace(sep, "/")
+
+    return arcname
+
+
 def _iter_file(path):
     """Yield data from a file"""
     with open(path, "rb") as fp:
@@ -602,12 +626,14 @@ class ZipStream:
 
         path = os.path.normpath(path)
 
+        # special case - discover the arcname from the path
         if not arcname:
             arcname = os.path.basename(path)
             if not arcname:
                 raise ValueError(
                     "No arcname for path '{}' could be assumed".format(path)
                 )
+        arcname = _sanitize_arcname(arcname)
 
         # Not recursing - just add the path
         if not recurse or not os.path.isdir(path):
@@ -688,8 +714,7 @@ class ZipStream:
         Raises a TypeError if the data is not str, bytes, or an iterator.
         Raises a RuntimeError if the ZipStream has already been finalized.
         """
-        if not arcname:
-            raise ValueError("An arcname to store the data in is required")
+        arcname = _sanitize_arcname(arcname)
 
         if data is None:
             data = b""
@@ -730,6 +755,8 @@ class ZipStream:
 
     def mkdir(self, arcname):
         """Create a directory inside the ZipStream"""
+        arcname = _sanitize_arcname(arcname)
+
         if arcname[-1] not in PATH_SEPARATORS:
             arcname += "/"
 

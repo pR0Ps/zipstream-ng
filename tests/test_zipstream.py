@@ -475,6 +475,9 @@ def test_creating_dirs_with_data():
 def test_mkdir():
     zs = ZipStream(sized=True)
 
+    with pytest.raises(ValueError, match="A valid arcname .* is required"):
+        zs.mkdir("")
+
     PATHS = (
         "folder0",  # no trailing slash
         "folder1",
@@ -609,9 +612,9 @@ def test_adding_data(caplog, data, ct):
         data = b"".join(data)
 
     # Test arcname is required
-    with pytest.raises(ValueError, match="An arcname to store the data in is required"):
+    with pytest.raises(ValueError, match="A valid arcname .* is required"):
         zs.add(tostore, None)
-    with pytest.raises(ValueError, match="An arcname to store the data in is required"):
+    with pytest.raises(ValueError, match="A valid arcname .* is required"):
         zs.add(tostore, "")
     with pytest.raises(ValueError, match="Can't store .* as a directory"):
         zs.add(tostore, "directory/")
@@ -715,6 +718,33 @@ def test_adding_empty_name(tmpdir, monkeypatch):
         zs.add_path(tmpdir)
     with pytest.raises(ValueError, match="No arcname for path"):
         zs.add_path(tmpdir, arcname="")
+
+
+def test_adding_null_byte_name():
+    zs = ZipStream(sized=True)
+
+    zs.add(b"data", "file.txt\x00and more")
+    with pytest.raises(ValueError, match="A valid arcname .* is required"):
+        zs.add(b"otherdata", "\x00nofilename")
+
+    zs.mkdir("directory\x00and more")
+    with pytest.raises(ValueError, match="A valid arcname .* is required"):
+        zs.mkdir("\x00nodirectory")
+
+    expected_len = len(zs)
+    data = bytes(zs)
+    assert len(data) == expected_len
+
+    zinfos = sorted(_get_zip(data).infolist(), key=lambda x: x.filename)
+    assert len(zinfos) == 2
+
+    assert zinfos[0].filename == "directory/"
+    assert zinfos[0].file_size == 0
+    assert zinfos[0].is_dir()
+
+    assert zinfos[1].filename == "file.txt"
+    assert zinfos[1].file_size == 4
+    assert not zinfos[1].is_dir()
 
 
 @pytest.mark.parametrize("data", [
