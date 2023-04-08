@@ -874,9 +874,14 @@ class ZipStream:
         data = kwargs.get("data")
         size = kwargs.get("size")
 
+        if path:
+            st = os.stat(path)
+        else:
+            st = None
+
         # Get the modified time of the added path (use current time for
         # non-paths) and use it to update the last_modified property
-        mtime = time.localtime(os.stat(path).st_mtime if path else None)[0:6]
+        mtime = time.localtime(st.st_mtime if path else None)[0:6]
         if self._last_modified is None or self._last_modified < mtime:
             self._last_modified = mtime
 
@@ -885,10 +890,10 @@ class ZipStream:
             if data is not None:
                 kwargs["size"] = len(data)
             elif path is not None:
-                if os.path.isdir(path):
+                if stat.S_ISDIR(st.st_mode):
                     kwargs["size"] = 0
                 else:
-                    kwargs["size"] = os.path.getsize(path)
+                    kwargs["size"] = st.st_size
 
         # If the ZipStream is sized then it will look at what is being added and
         # queue up some information for _get_size to use to compute the total
