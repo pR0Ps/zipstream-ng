@@ -640,6 +640,24 @@ def test_adding_invalid_data(data):
         zs.add(data, "test")
 
 
+@pytest.mark.parametrize("name", ["file", "directory/"])
+def test_adding_broken_symlinks(tmpdir, name):
+    """Test that adding a broken symlink will raise a FileNotFoundError"""
+
+    t = tmpdir.mkdir("top")
+    if not hasattr(t, "mksymlinkto"):
+        pytest.skip("mksymlinkto not supported - can't test broken links")
+
+    l = t.join(name)
+    l.mksymlinkto("nothing")
+
+    zs = ZipStream()
+    with pytest.raises(FileNotFoundError):
+        zs.add_path(l)
+    with pytest.raises(FileNotFoundError):
+        zs.add_path(t)
+
+
 @pytest.mark.parametrize("data", [
     ["strs", "cannot", "be", "added"],
     range(10),
