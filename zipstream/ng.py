@@ -4,6 +4,7 @@
 
 import collections
 import datetime
+import errno
 import functools
 import logging
 import os
@@ -613,8 +614,9 @@ class ZipStream:
         If given, `compress_type` and `compress_level` override the settings the
         ZipStream was initialized with.
 
-        Raises a ValueError if the path does not exist or an arcname isn't
-        provided and the assumed one is empty.
+        Raises a FileNotFoundError if the path does not exist
+        Raises a ValueError if an arcname isn't provided and the assumed
+        one is empty.
         Raises a RuntimeError if the ZipStream has already been finalized.
         """
         # Resolve path objects to strings on Python 3.5
@@ -622,7 +624,7 @@ class ZipStream:
             path = path.__fspath__()
 
         if not os.path.exists(path):
-            raise ValueError("Path '{}' not found".format(path))
+            raise FileNotFoundError(errno.ENOENT, os.strerror(errno.ENOENT), path)
 
         path = os.path.normpath(path)
 

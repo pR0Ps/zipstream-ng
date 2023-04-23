@@ -693,7 +693,7 @@ def test_directory_links_without_infinite_recursion(tmpdir):
 
 
 def test_adding_missing_path(tmpdir):
-    with pytest.raises(ValueError):
+    with pytest.raises(FileNotFoundError):
         ZipStream.from_path(tmpdir.join("doesntexist"))
 
 
