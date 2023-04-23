@@ -342,10 +342,7 @@ class ZipStreamInfo(ZipInfo):
             self.external_attr,
             header_offset
         )
-        yield centdir
-        yield filename
-        yield extra_data
-        yield self.comment
+        return centdir + filename + extra_data + self.comment
 
     if PY35_COMPAT:  # pragma: no cover
         # Backport essential functions introduced in 3.6
@@ -1042,8 +1039,7 @@ class ZipStream:
         # Write central directory file headers
         centDirOffset = self._pos
         for zinfo in self._filelist:
-            for x in zinfo._central_directory_header_data():
-                yield self._track(x)
+            yield self._track(zinfo._central_directory_header_data())
 
         # Write end of central directory record
         zip64EndRecStart = self._pos
@@ -1063,8 +1059,6 @@ class ZipStream:
                 centDirSize,
                 centDirOffset
             )
-            yield self._track(zip64EndRec)
-
             zip64LocRec = struct.pack(
                 structEndArchive64Locator,
                 stringEndArchive64Locator,
@@ -1072,7 +1066,8 @@ class ZipStream:
                 zip64EndRecStart,
                 1
             )
-            yield self._track(zip64LocRec)
+            yield self._track(zip64EndRec + zip64LocRec)
+
             centDirCount = min(centDirCount, 0xFFFF)
             centDirSize = min(centDirSize, 0xFFFFFFFF)
             centDirOffset = min(centDirOffset, 0xFFFFFFFF)
@@ -1087,8 +1082,7 @@ class ZipStream:
             centDirOffset,
             len(self._comment)
         )
-        yield self._track(endRec)
-        yield self._track(self._comment)
+        yield self._track(endRec + self._comment)
 
     def _get_size(self):
         """Calculate the final size of the zip stream as files are added"""
