@@ -21,7 +21,7 @@ Features:
  - Includes a clone of Python's `http.server` module with zip support added. Try `python -m zipstream.server`.
  - Automatically uses Zip64 extensions, but only if they are required.
  - No external dependencies.
-
+ - Low memory use: As an example, I just ran a quick test against ~8TB of a mix of ~10,000 small and multi-GB files and the peak memory usage of the process was ~30MB.
 
 Installation
 ------------
