@@ -5,24 +5,35 @@ zipstream-ng
 ![Python](https://img.shields.io/pypi/pyversions/zipstream-ng.svg)
 
 A modern and easy to use streamable zip file generator. It can package and stream many files and
-folders on the fly without needing temporary files or excessive memory.
+folders into a zip on the fly without needing temporary files or excessive memory. It can also
+calculate the final size of the zip file before streaming it.
 
-Includes the ability to calculate the total size of the stream before any data is actually added
-(provided no compression is used). This makes it ideal for use in web applications since the total
-size can be used to set the `Content-Length` header without having to generate the entire file first
-(see examples below).
 
-Features:
+### Features:
  - Generates zip data on the fly as it's requested.
  - Can calculate the total size of the resulting zip file before generation even begins.
- - Low memory use: Since the zip is generated as it's requested, very little has to be kept in
+ - Low memory usage: Since the zip is generated as it's requested, very little has to be kept in
    memory (peak usage of less than 20MB is typical, even for TBs of files).
  - Flexible API: Typical use cases are simple, complicated ones are possible.
  - Supports zipping data from files, bytes, strings, and any other iterable objects.
+ - Keeps track of the date of the most recently modified file added to the zip file.
  - Threadsafe: Won't mangle data if multiple threads concurrently add data to the same stream.
  - Includes a clone of Python's `http.server` module with zip support added. Try `python -m zipstream.server`.
  - Automatically uses Zip64 extensions, but only if they are required.
  - No external dependencies.
+
+
+### Ideal for web backends:
+ - Generating zip data on the fly requires very little memory, no disk usage, and starts producing
+   data with less latency than creating the entire zip up-front. This means faster responses, no
+   temporary files, and very low memory usage.
+ - The ability to calculate the total size of the stream before any data is actually generated
+   (provided no compression is used) means web backends can provide a `Content-Length` header in
+   their responses. This allows clients to show a progress bar as the stream is transferred.
+ - By keeping track of the date of the most recently modified file added to the zip, web
+   backends can provide a `Last-Modified` header. This allows clients to check if they have the most
+   up-to-date version of the zip with just a HEAD request instead of having to download the entire
+   thing.
 
 
 Installation
