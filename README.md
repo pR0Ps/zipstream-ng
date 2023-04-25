@@ -17,7 +17,7 @@ Features:
  - Can calculate the total size of the resulting zip file before generation even begins.
  - Flexible API: Typical use cases are simple, complicated ones are possible.
  - Supports zipping data from files, bytes, strings, and any other iterable objects.
- - Threadsafe: Won't mangle data if multiple threads concurrently add/read data to/from the same stream.
+ - Threadsafe: Won't mangle data if multiple threads concurrently add data to the same stream.
  - Includes a clone of Python's `http.server` module with zip support added. Try `python -m zipstream.server`.
  - Automatically uses Zip64 extensions, but only if they are required.
  - No external dependencies.
