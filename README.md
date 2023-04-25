@@ -15,13 +15,15 @@ size can be used to set the `Content-Length` header without having to generate t
 Features:
  - Generates zip data on the fly as it's requested.
  - Can calculate the total size of the resulting zip file before generation even begins.
+ - Low memory use: Since the zip is generated as it's requested, very little has to be kept in
+   memory (peak usage of less than 20MB is typical, even for TBs of files).
  - Flexible API: Typical use cases are simple, complicated ones are possible.
  - Supports zipping data from files, bytes, strings, and any other iterable objects.
  - Threadsafe: Won't mangle data if multiple threads concurrently add/read data to/from the same stream.
  - Includes a clone of Python's `http.server` module with zip support added. Try `python -m zipstream.server`.
  - Automatically uses Zip64 extensions, but only if they are required.
  - No external dependencies.
- - Low memory use: As an example, I just ran a quick test against ~8TB of a mix of ~10,000 small and multi-GB files and the peak memory usage of the process was ~30MB.
+
 
 Installation
 ------------
