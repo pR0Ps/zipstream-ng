@@ -15,6 +15,8 @@ size can be used to set the `Content-Length` header without having to generate t
 Features:
  - Generates zip data on the fly as it's requested.
  - Can calculate the total size of the resulting zip file before generation even begins.
+ - Low memory use: Since the zip is generated as it's requested, very little has to be kept in
+   memory (peak usage of less than 20MB is typical, even for TBs of files).
  - Flexible API: Typical use cases are simple, complicated ones are possible.
  - Supports zipping data from files, bytes, strings, and any other iterable objects.
  - Threadsafe: Won't mangle data if multiple threads concurrently add data to the same stream.
