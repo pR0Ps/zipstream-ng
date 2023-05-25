@@ -1,6 +1,17 @@
 zipstream-ng changelog
 ======================
 
+### [v1.6.0]
+- Add the ability to provide a custom "walk" function to `ZipStream.add_path` for more control
+  over how directories are walked.
+- Change the exception raised when trying to add a file that doesn't exist from a `ValueError` to a
+  more appropriate `FileNotFoundError`.
+- Optimize the number of `os.stat` calls required to add a file.
+- Fix issue where adding data with an arcname that contained a null byte would lead to an incorrect
+  size being calculated.
+- When `ZipStream.add` is provided a size alongside an iterable, the size will now be used to
+  determine if Zip64 extensions are needed.
+
 ### [v1.5.0]
 - Add `ZipStream.mkdir` method to make an empty directory inside the stream.
 - Fix an issue where `ZipStream.get_info` would return incorrect values for `compress_level` in
@@ -69,3 +80,4 @@ zipstream-ng changelog
  [v1.3.5]: https://github.com/pR0Ps/zipstream-ng/compare/v1.3.4...v1.3.5
  [v1.4.0]: https://github.com/pR0Ps/zipstream-ng/compare/v1.3.5...v1.4.0
  [v1.5.0]: https://github.com/pR0Ps/zipstream-ng/compare/v1.4.0...v1.5.0
+ [v1.6.0]: https://github.com/pR0Ps/zipstream-ng/compare/v1.5.0...v1.6.0
