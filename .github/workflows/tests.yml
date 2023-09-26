@@ -5,6 +5,10 @@ on:
   push:
     branches:
       - master
+  # Run it every month to make sure it still works
+  schedule:
+   - cron:  '0 0 1 * *'
+
 jobs:
   build:
     name: tests

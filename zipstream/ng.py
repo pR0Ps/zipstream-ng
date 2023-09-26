@@ -276,7 +276,7 @@ class ZipStreamInfo(ZipInfo):
         yield self.DataDescriptor(zip64)
 
     def _central_directory_header_data(self):
-        """Yield a central directory file header for this file"""
+        """Return a central directory file header for this file"""
         # Based on code in zipfile.ZipFile._write_end_record
 
         dosdate, dostime = _timestamp_to_dos(self.date_time)
@@ -575,7 +575,23 @@ class ZipStream:
         if not self._sized:
             raise TypeError("The length of this ZipStream is unknown")
 
-        return self._get_size()
+        with self._size_lock:
+            (num_files, files_size, cdfh_size) = self._size_prog
+
+        # Calculate the amount of data the end of central directory needs. This
+        # is computed every time since it depends on the other metrics. Also,
+        # it means that we don't have to deal with detecting if the comment
+        # changes.
+        eocd_size = sizeEndCentDir + len(self._comment)  # 22 + comment len
+        if (
+            num_files > ZIP_FILECOUNT_LIMIT or
+            files_size > ZIP64_LIMIT or
+            cdfh_size > ZIP64_LIMIT
+        ):
+            eocd_size += sizeEndCentDir64  # 56
+            eocd_size += sizeEndCentDir64Locator  # 20
+
+        return cdfh_size + files_size + eocd_size
 
     def __bytes__(self):
         """Get the bytes of the ZipStream"""
@@ -928,8 +944,8 @@ class ZipStream:
                 else:
                     kwargs["size"] = st.st_size
 
-        # If the ZipStream is sized then it will look at what is being added and
-        # queue up some information for _get_size to use to compute the total
+        # If the ZipStream is sized then it will look at what is being added
+        # and add the number of bytes used by this file to the running total
         # length of the stream. It will also read any iterables fully into
         # memory so their size is known.
         if self._sized:
@@ -1147,23 +1163,3 @@ class ZipStream:
 
             # Record the current progress for next time
             self._size_prog = (num_files, files_size, cdfh_size)
-
-    def _get_size(self):
-        """Calculate the final size of the zip stream as files are added"""
-        with self._size_lock:
-            (num_files, files_size, cdfh_size) = self._size_prog
-
-        # Calculate the amount of data the end of central directory needs. This
-        # is computed every time since it depends on the other metrics. Also,
-        # it means that we don't have to deal with detecting if the comment
-        # changes.
-        eocd_size = sizeEndCentDir + len(self._comment)  # 22 + comment len
-        if (
-            num_files > ZIP_FILECOUNT_LIMIT or
-            files_size > ZIP64_LIMIT or
-            cdfh_size > ZIP64_LIMIT
-        ):
-            eocd_size += sizeEndCentDir64  # 56
-            eocd_size += sizeEndCentDir64Locator  # 20
-
-        return cdfh_size + files_size + eocd_size
