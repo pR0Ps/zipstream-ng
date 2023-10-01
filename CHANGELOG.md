@@ -1,6 +1,15 @@
 zipstream-ng changelog
 ======================
 
+### [v1.7.0]
+- Add the ability to get information on added files using `ZipStream.info_list`. This function
+  replaces `ZipStream.get_info` which would only provide information on files that had already been
+  streamed.
+- Deprecate `ZipStream.get_info`. It will continue to work until the next major version but
+  will now emit a warning when used.
+- Reduce memory usage for sized `ZipStream` objects by updating the final size of the stream as
+  files are added instead of storing the required information so the size could be calculated later.
+
 ### [v1.6.0]
 - Add the ability to provide a custom "walk" function to `ZipStream.add_path` for more control
   over how directories are walked.
@@ -81,3 +90,4 @@ zipstream-ng changelog
  [v1.4.0]: https://github.com/pR0Ps/zipstream-ng/compare/v1.3.5...v1.4.0
  [v1.5.0]: https://github.com/pR0Ps/zipstream-ng/compare/v1.4.0...v1.5.0
  [v1.6.0]: https://github.com/pR0Ps/zipstream-ng/compare/v1.5.0...v1.6.0
+ [v1.7.0]: https://github.com/pR0Ps/zipstream-ng/compare/v1.6.0...v1.7.0
