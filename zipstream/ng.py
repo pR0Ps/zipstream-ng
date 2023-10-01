@@ -806,7 +806,7 @@ class ZipStream:
         """Create a directory inside the ZipStream"""
         arcname = _sanitize_arcname(arcname)
 
-        if arcname[-1] not in PATH_SEPARATORS:
+        if arcname[-1] != "/":
             arcname += "/"
 
         self.add(data=None, arcname=arcname)
@@ -1134,7 +1134,7 @@ class ZipStream:
             files_size += sizeFileHeader + arcname_len # 30 + name len
 
             # Folders don't have any data or require any extra records
-            if arcname[-1] not in PATH_SEPARATORS:
+            if arcname[-1] != "/":
 
                 # When using zip64, the size and compressed size of the file are
                 # written as an extra field in the FileHeader.
