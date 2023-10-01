@@ -144,7 +144,7 @@ def test_zipstream_compression(caplog, files, ct):
 @pytest.mark.parametrize("cl", [None, 2])
 def test_mixed_compression_and_getinfo(ct, cl):
     """Test that files are compressed using the correct method and level and
-    that the information from get_info accurately reflects this"""
+    that the information from info_list accurately reflects this"""
 
     # Make the test just test compression types on 3.6 and below
     cl, TEST_CL = (None, None) if PY36 else (cl, 5)
@@ -162,7 +162,7 @@ def test_mixed_compression_and_getinfo(ct, cl):
 
     zf = _get_zip(zs)
     zinfos = zf.infolist()
-    fullinfos = zs.get_info()
+    fullinfos = zs.info_list()
     assert len(zinfos) == len(fullinfos) == 9
 
     def assert_zinfo(idx, name, compress_type, compress_level):
@@ -407,7 +407,7 @@ def test_adding_windows_paths(monkeypatch):
 
     assert predicted == actual
 
-    info = zs.get_info()
+    info = zs.info_list()
     assert len(info) == 6
     for x in info:
         assert x["name"] == "a/b/"
@@ -1114,6 +1114,116 @@ def test_invalid_dates(monkeypatch, date):
         assert zinfos[0].date_time == (2107, 12, 31, 23, 59, 58)
 
 
+def test_info_list(monkeypatch):
+    faketime = (1980, 1, 1, 0, 0, 0)
+
+    def fakelocaltime(_=None):
+        return faketime
+    monkeypatch.setattr(time, "localtime", fakelocaltime)
+
+    data = bytearray()
+    zs = ZipStream(compress_type=zipfile.ZIP_STORED)
+    zs.add(None, "empty/", compress_type=zipfile.ZIP_DEFLATED)
+    zs.add(b"test", "text.txt", compress_type=zipfile.ZIP_BZIP2, compress_level=5 if not PY36 else None)
+    zs.add(b"test", "text2.txt")
+    info = list(zs.info_list())
+    assert len([x for x in info if not x["streamed"]]) == zs.num_queued() == 3
+    assert len([x for x in info if x["streamed"]]) == zs.num_streamed() == 0
+
+    assert info[0] == {
+        "name": "empty/",
+        "size": 0,
+        "compressed_size": 0,
+        "datetime": None,
+        "is_dir": True,
+        "CRC": None,
+        "compress_type": zipfile.ZIP_DEFLATED,
+        "compress_level": None,
+        "streamed": False,
+    }
+    assert info[1] == {
+        "name": "text.txt",
+        "size": 4,
+        "compressed_size": None,
+        "datetime": None,
+        "is_dir": False,
+        "CRC": None,
+        "compress_type": zipfile.ZIP_BZIP2,
+        "compress_level": 5 if not PY36 else None,
+        "streamed": False,
+    }
+    assert info[2] == {
+        "name": "text2.txt",
+        "size": 4,
+        "compressed_size": 4,
+        "datetime": None,
+        "is_dir": False,
+        "CRC": None,
+        "compress_type": zipfile.ZIP_STORED,
+        "compress_level": None,
+        "streamed": False,
+    }
+
+    data += b"".join(zs.all_files())
+    info2 = list(zs.info_list())
+    assert len([x for x in info2 if not x["streamed"]]) == zs.num_queued() == 0
+    assert len([x for x in info2 if x["streamed"]]) == zs.num_streamed() == 3
+
+    # Make sure any information that ws provided up-front hasn't changed
+    # (except for the "streamed" key which mush got False -> True)
+    for pre, post in zip(info, info2):
+        for k, v in pre.items():
+            if k == "streamed":
+                assert not v
+                assert post[k]
+            elif v is not None:
+                assert post[k] == v
+
+    assert info2[0] == {
+        "name": "empty/",
+        "size": 0,
+        "compressed_size": 0,
+        "datetime": faketime,
+        "is_dir": True,
+        "CRC": 0,
+        "compress_type": zipfile.ZIP_DEFLATED,
+        "compress_level": None,
+        "streamed": True,
+    }
+    assert info2[1] == {
+        "name": "text.txt",
+        "size": 4,
+        "compressed_size": 40,
+        "datetime": faketime,
+        "is_dir": False,
+        "CRC": 3632233996,
+        "compress_type": zipfile.ZIP_BZIP2,
+        "compress_level": 5 if not PY36 else None,
+        "streamed": True,
+    }
+    assert info2[2] == {
+        "name": "text2.txt",
+        "size": 4,
+        "compressed_size": 4,
+        "datetime": faketime,
+        "is_dir": False,
+        "CRC": 3632233996,
+        "compress_type": zipfile.ZIP_STORED,
+        "compress_level": None,
+        "streamed": True,
+    }
+
+    zs.add(json.dumps(info2, indent=2), "manifest.json")
+
+    assert zs.num_queued() == 1
+    data += bytes(zs)
+    assert zs.num_queued() == 0
+    assert len(zs.info_list()) == 4
+
+    zinfos = _get_zip(data).infolist()
+    assert len(zinfos) == 4
+
+
 def test_get_info(monkeypatch):
 
     faketime = (1980, 1, 1, 0, 0, 0)
@@ -1128,10 +1238,12 @@ def test_get_info(monkeypatch):
     zs.add(b"test", "text.txt", compress_type=zipfile.ZIP_BZIP2, compress_level=5 if not PY36 else None)
     zs.add(b"test", "text2.txt")
     assert zs.num_queued() == 3
-    assert len(zs.get_info()) == 0
+    with pytest.warns(DeprecationWarning, match="ZipStream.info_list"):
+        assert len(zs.get_info()) == 0
     data += b"".join(zs.all_files())
     assert zs.num_queued() == 0
-    info = zs.get_info()
+    with pytest.warns(DeprecationWarning, match="ZipStream.info_list"):
+        info = zs.get_info()
     assert len(info) == 3
 
     assert info[0] == {
@@ -1169,7 +1281,8 @@ def test_get_info(monkeypatch):
     assert zs.num_queued() == 1
     data += bytes(zs)
     assert zs.num_queued() == 0
-    assert len(zs.get_info()) == 4
+    with pytest.warns(DeprecationWarning, match="ZipStream.info_list"):
+        assert len(zs.get_info()) == 4
 
     zinfos = _get_zip(data).infolist()
     assert len(zinfos) == 4

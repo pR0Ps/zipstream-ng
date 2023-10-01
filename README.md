@@ -153,8 +153,8 @@ if __name__ == "__main__":
 It's possible to generate the zip stream, but stop before finalizing it. This enables adding
 something like a file manifest or compression log after all the files have been added.
 
-`ZipStream` provides a `get_info` method that returns information on all the files that have been
-added to the stream. In this example, all that information will be added to the zip in a file named
+`ZipStream` provides a `info_list` method that returns information on all the files added to the
+stream. In this example, all that information will be added to the zip in a file named
 "manifest.json" before finalizing it.
 
 ```python
@@ -166,7 +166,7 @@ def gen_zipfile()
     yield from zs.all_files()
     zs.add(
         json.dumps(
-            zs.get_info(),
+            zs.info_list(),
             indent=2
         ),
         "manifest.json"

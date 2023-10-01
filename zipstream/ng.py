@@ -13,6 +13,7 @@ import struct
 import sys
 import time
 import threading
+import warnings
 from zipfile import (
     # Classes
     ZipInfo,
@@ -276,7 +277,7 @@ class ZipStreamInfo(ZipInfo):
         yield self.DataDescriptor(zip64)
 
     def _central_directory_header_data(self):
-        """Yield a central directory file header for this file"""
+        """Return a central directory file header for this file"""
         # Based on code in zipfile.ZipFile._write_end_record
 
         dosdate, dostime = _timestamp_to_dos(self.date_time)
@@ -342,10 +343,7 @@ class ZipStreamInfo(ZipInfo):
             self.external_attr,
             header_offset
         )
-        yield centdir
-        yield filename
-        yield extra_data
-        yield self.comment
+        return centdir + filename + extra_data + self.comment
 
     if PY35_COMPAT:  # pragma: no cover
         # Backport essential functions introduced in 3.6
@@ -554,7 +552,6 @@ class ZipStream:
 
         # For calculating the size
         self._sized = sized
-        self._to_count = collections.deque()
         self._size_prog = (0, 0, 0)
         self._size_lock = threading.Lock()
 
@@ -579,7 +576,23 @@ class ZipStream:
         if not self._sized:
             raise TypeError("The length of this ZipStream is unknown")
 
-        return self._get_size()
+        with self._size_lock:
+            (num_files, files_size, cdfh_size) = self._size_prog
+
+        # Calculate the amount of data the end of central directory needs. This
+        # is computed every time since it depends on the other metrics. Also,
+        # it means that we don't have to deal with detecting if the comment
+        # changes.
+        eocd_size = sizeEndCentDir + len(self._comment)  # 22 + comment len
+        if (
+            num_files > ZIP_FILECOUNT_LIMIT or
+            files_size > ZIP64_LIMIT or
+            cdfh_size > ZIP64_LIMIT
+        ):
+            eocd_size += sizeEndCentDir64  # 56
+            eocd_size += sizeEndCentDir64Locator  # 20
+
+        return cdfh_size + files_size + eocd_size
 
     def __bytes__(self):
         """Get the bytes of the ZipStream"""
@@ -794,7 +807,7 @@ class ZipStream:
         """Create a directory inside the ZipStream"""
         arcname = _sanitize_arcname(arcname)
 
-        if arcname[-1] not in PATH_SEPARATORS:
+        if arcname[-1] != "/":
             arcname += "/"
 
         self.add(data=None, arcname=arcname)
@@ -859,6 +872,59 @@ class ZipStream:
         """The number of files that have already been added to the stream"""
         return len(self._filelist)
 
+    def info_list(self):
+        """Get a list of dicts containing data about each file in the ZipStream
+
+        File information will be yielded in the order that the files were
+        added.
+
+        All files will be included in this list. The "streamed" key indicates
+        if the file has been written to the ZipStream or not. Files that
+        haven't yet been written to the ZipStream will be missing information
+        that's only known post-write (compressed size, CRC, datetime, etc.)
+        """
+        # Need to prevent another thread from popping a result from
+        # self._queue, then this function being run before it can be added to
+        # self._filelist
+        with self._gen_lock:
+            info = [
+                {
+                    "name": x.filename,
+                    "size": x.file_size,
+                    "compressed_size": x.compress_size,
+                    "datetime": x.date_time,
+                    "is_dir": x.is_dir(),
+                    "CRC": x.CRC,
+                    "compress_type": x.compress_type,
+                    "compress_level": getattr(x, "_compresslevel", None),  # <3.7 compat
+                    "streamed": True,
+                }
+                for x in self._filelist
+            ]
+            for x in self._queue:
+                is_dir = x["arcname"][-1] == "/"
+                compress_type = x.get("compress_type", self._compress_type)
+                if is_dir:
+                    compress_size = 0
+                elif compress_type == ZIP_STORED:
+                    compress_size = x.get("size")
+                else:
+                    compress_size = None
+
+                info.append({
+                    "name": x["arcname"],
+                    "size": x.get("size"),
+                    "compressed_size": compress_size,
+                    "datetime": None,
+                    "is_dir": is_dir,
+                    "CRC": None,
+                    "compress_type": compress_type,
+                    "compress_level": x.get("compress_level", self._compress_level),
+                    "streamed": False,
+                })
+
+        return info
+
     def get_info(self):
         """Get a list of dicts containing data about each file currently in the
         ZipStream.
@@ -866,6 +932,11 @@ class ZipStream:
         Note that this ONLY includes files that have already been written to the
         ZipStream. Queued files are NOT included.
         """
+        warnings.warn(
+            "ZipStream.get_info is deprecated and will be removed in a future "
+            "version. Use ZipStream.info_list instead",
+            DeprecationWarning,
+        )
         return [
             {
                 "name": x.filename,
@@ -932,8 +1003,8 @@ class ZipStream:
                 else:
                     kwargs["size"] = st.st_size
 
-        # If the ZipStream is sized then it will look at what is being added and
-        # queue up some information for _get_size to use to compute the total
+        # If the ZipStream is sized then it will look at what is being added
+        # and add the number of bytes used by this file to the running total
         # length of the stream. It will also read any iterables fully into
         # memory so their size is known.
         if self._sized:
@@ -946,7 +1017,7 @@ class ZipStream:
                 kwargs["size"] = len(data)
                 kwargs["data"] = data
 
-            self._to_count.append((kwargs["arcname"], kwargs["size"]))
+            self._add_size_from_file(kwargs["arcname"], kwargs["size"])
 
         # Remove any default/redundant compression parameters
         if kwargs.get("compress_type") in (None, self._compress_type):
@@ -985,7 +1056,7 @@ class ZipStream:
         zinfo.compress_type = compress_type if compress_type is not None else self._compress_type
         if not PY36_COMPAT:
             if zinfo.compress_type in (ZIP_STORED, ZIP_LZMA):
-                # Make sure the zinfo properties are accurate for get_info
+                # Make sure the zinfo properties are accurate for info_list
                 zinfo._compresslevel = None
             else:
                 zinfo._compresslevel = compress_level if compress_level is not None else self._compress_level
@@ -1042,8 +1113,7 @@ class ZipStream:
         # Write central directory file headers
         centDirOffset = self._pos
         for zinfo in self._filelist:
-            for x in zinfo._central_directory_header_data():
-                yield self._track(x)
+            yield self._track(zinfo._central_directory_header_data())
 
         # Write end of central directory record
         zip64EndRecStart = self._pos
@@ -1063,8 +1133,6 @@ class ZipStream:
                 centDirSize,
                 centDirOffset
             )
-            yield self._track(zip64EndRec)
-
             zip64LocRec = struct.pack(
                 structEndArchive64Locator,
                 stringEndArchive64Locator,
@@ -1072,7 +1140,8 @@ class ZipStream:
                 zip64EndRecStart,
                 1
             )
-            yield self._track(zip64LocRec)
+            yield self._track(zip64EndRec + zip64LocRec)
+
             centDirCount = min(centDirCount, 0xFFFF)
             centDirSize = min(centDirSize, 0xFFFFFFFF)
             centDirOffset = min(centDirOffset, 0xFFFFFFFF)
@@ -1087,15 +1156,10 @@ class ZipStream:
             centDirOffset,
             len(self._comment)
         )
-        yield self._track(endRec)
-        yield self._track(self._comment)
+        yield self._track(endRec + self._comment)
 
-    def _get_size(self):
-        """Calculate the final size of the zip stream as files are added"""
-        # The aim is to store as little data as possible and avoid recalculating
-        # the size of every file every time. By storing some data on how much
-        # space is required for the currently-counted files, we can just add to
-        # it for every new file.
+    def _add_size_from_file(self, arcname, size):
+        """Add the file to the calculated size of the ZipStream"""
 
         # Need to prevent multiple threads from reading _size_prog, calculating
         # independently, then all writing back conflicting progress.
@@ -1105,77 +1169,56 @@ class ZipStream:
             # exceeding a limit.
             (num_files, files_size, cdfh_size) = self._size_prog
 
-            while True:
-                try:
-                    arcname, size = self._to_count.popleft()
-                except IndexError:
-                    break
+            # Get the number of bytes the arcname uses by encoding it in
+            # the same way that ZipStreamInfo._encodeFilenameFlags does
+            try:
+                arcname_len = len(arcname.encode("ascii"))
+            except UnicodeEncodeError:
+                arcname_len = len(arcname.encode("utf-8"))
 
-                # Get the number of bytes the arcname uses by encoding it in
-                # the same way that ZipStreamInfo._encodeFilenameFlags does
-                try:
-                    arcname_len = len(arcname.encode("ascii"))
-                except UnicodeEncodeError:
-                    arcname_len = len(arcname.encode("utf-8"))
+            # Calculate if zip64 extensions are required in the same way that
+            # ZipStreamInfo.file_data does
+            uses_zip64 = size * ZIP64_ESTIMATE_FACTOR > ZIP64_LIMIT
 
-                # Calculate if zip64 extensions are required in the same way that
-                # ZipStreamInfo.file_data does
-                uses_zip64 = size * ZIP64_ESTIMATE_FACTOR > ZIP64_LIMIT
+            # Track the number of extra records in the central directory file
+            # header encoding this file will require
+            cdfh_extras = 0
 
-                # Track the number of extra records in the central directory file
-                # header encoding this file will require
-                cdfh_extras = 0
+            # Any files added after the size exceeds the zip64 limit will
+            # require an extra record to encode their location.
+            if files_size > ZIP64_LIMIT:
+                cdfh_extras += 1
 
-                # Any files added after the size exceeds the zip64 limit will
-                # require an extra record to encode their location.
-                if files_size > ZIP64_LIMIT:
-                    cdfh_extras += 1
+            # FileHeader
+            files_size += sizeFileHeader + arcname_len # 30 + name len
 
-                # FileHeader
-                files_size += sizeFileHeader + arcname_len # 30 + name len
+            # Folders don't have any data or require any extra records
+            if arcname[-1] != "/":
 
-                # Folders don't have any data or require any extra records
-                if arcname[-1] not in PATH_SEPARATORS:
+                # When using zip64, the size and compressed size of the file are
+                # written as an extra field in the FileHeader.
+                if uses_zip64:
+                    files_size += 20  # struct.calcsize('<HHQQ')
 
-                    # When using zip64, the size and compressed size of the file are
-                    # written as an extra field in the FileHeader.
-                    if uses_zip64:
-                        files_size += 20  # struct.calcsize('<HHQQ')
+                # file data
+                files_size += size
 
-                    # file data
-                    files_size += size
+                # DataDescriptor
+                files_size += 24 if uses_zip64 else 16  # struct.calcsize('<LLQQ' if zip64 else '<LLLL')
 
-                    # DataDescriptor
-                    files_size += 24 if uses_zip64 else 16  # struct.calcsize('<LLQQ' if zip64 else '<LLLL')
+                # Storing the size of a large file requires 2 extra records
+                # (size and compressed size)
+                if size > ZIP64_LIMIT:
+                    cdfh_extras += 2
 
-                    # Storing the size of a large file requires 2 extra records
-                    # (size and compressed size)
-                    if size > ZIP64_LIMIT:
-                        cdfh_extras += 2
+            cdfh_size += sizeCentralDir  # 46
+            cdfh_size += arcname_len
 
-                cdfh_size += sizeCentralDir  # 46
-                cdfh_size += arcname_len
+            # Add space for extra data
+            if cdfh_extras:
+                cdfh_size += 4 + (8 * cdfh_extras)  # struct.calcsize('<HH' + 'Q' * cdfh_extras)
 
-                # Add space for extra data
-                if cdfh_extras:
-                    cdfh_size += 4 + (8 * cdfh_extras)  # struct.calcsize('<HH' + 'Q' * cdfh_extras)
-
-                num_files += 1
+            num_files += 1
 
             # Record the current progress for next time
             self._size_prog = (num_files, files_size, cdfh_size)
-
-        # Calculate the amount of data the end of central directory needs. This
-        # is computed every time since it depends on the other metrics. Also,
-        # it means that we don't have to deal with detecting if the comment
-        # changes.
-        eocd_size = sizeEndCentDir + len(self._comment)  # 22 + comment len
-        if (
-            num_files > ZIP_FILECOUNT_LIMIT or
-            files_size > ZIP64_LIMIT or
-            cdfh_size > ZIP64_LIMIT
-        ):
-            eocd_size += sizeEndCentDir64  # 56
-            eocd_size += sizeEndCentDir64Locator  # 20
-
-        return cdfh_size + files_size + eocd_size
