@@ -13,6 +13,7 @@ import struct
 import sys
 import time
 import threading
+import warnings
 from zipfile import (
     # Classes
     ZipInfo,
@@ -871,6 +872,59 @@ class ZipStream:
         """The number of files that have already been added to the stream"""
         return len(self._filelist)
 
+    def info_list(self):
+        """Get a list of dicts containing data about each file in the ZipStream
+
+        File information will be yielded in the order that the files were
+        added.
+
+        All files will be included in this list. The "streamed" key indicates
+        if the file has been written to the ZipStream or not. Files that
+        haven't yet been written to the ZipStream will be missing information
+        that's only known post-write (compressed size, CRC, datetime, etc.)
+        """
+        # Need to prevent another thread from popping a result from
+        # self._queue, then this function being run before it can be added to
+        # self._filelist
+        with self._gen_lock:
+            info = [
+                {
+                    "name": x.filename,
+                    "size": x.file_size,
+                    "compressed_size": x.compress_size,
+                    "datetime": x.date_time,
+                    "is_dir": x.is_dir(),
+                    "CRC": x.CRC,
+                    "compress_type": x.compress_type,
+                    "compress_level": getattr(x, "_compresslevel", None),  # <3.7 compat
+                    "streamed": True,
+                }
+                for x in self._filelist
+            ]
+            for x in self._queue:
+                is_dir = x["arcname"][-1] == "/"
+                compress_type = x.get("compress_type", self._compress_type)
+                if is_dir:
+                    compress_size = 0
+                elif compress_type == ZIP_STORED:
+                    compress_size = x.get("size")
+                else:
+                    compress_size = None
+
+                info.append({
+                    "name": x["arcname"],
+                    "size": x.get("size"),
+                    "compressed_size": compress_size,
+                    "datetime": None,
+                    "is_dir": is_dir,
+                    "CRC": None,
+                    "compress_type": compress_type,
+                    "compress_level": x.get("compress_level", self._compress_level),
+                    "streamed": False,
+                })
+
+        return info
+
     def get_info(self):
         """Get a list of dicts containing data about each file currently in the
         ZipStream.
@@ -878,6 +932,11 @@ class ZipStream:
         Note that this ONLY includes files that have already been written to the
         ZipStream. Queued files are NOT included.
         """
+        warnings.warn(
+            "ZipStream.get_info is deprecated and will be removed in a future "
+            "version. Use ZipStream.info_list instead",
+            DeprecationWarning,
+        )
         return [
             {
                 "name": x.filename,
@@ -997,7 +1056,7 @@ class ZipStream:
         zinfo.compress_type = compress_type if compress_type is not None else self._compress_type
         if not PY36_COMPAT:
             if zinfo.compress_type in (ZIP_STORED, ZIP_LZMA):
-                # Make sure the zinfo properties are accurate for get_info
+                # Make sure the zinfo properties are accurate for info_list
                 zinfo._compresslevel = None
             else:
                 zinfo._compresslevel = compress_level if compress_level is not None else self._compress_level
