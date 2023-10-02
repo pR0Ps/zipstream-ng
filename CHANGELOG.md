@@ -1,6 +1,10 @@
 zipstream-ng changelog
 ======================
 
+### [v1.7.1]
+- Fix issue where it was possible to add paths with arcnames that didn't match the path contents
+  (file ending with "/", directory not ending with "/")
+
 ### [v1.7.0]
 - Add the ability to get information on added files using `ZipStream.info_list`. This function
   replaces `ZipStream.get_info` which would only provide information on files that had already been
@@ -91,3 +95,4 @@ zipstream-ng changelog
  [v1.5.0]: https://github.com/pR0Ps/zipstream-ng/compare/v1.4.0...v1.5.0
  [v1.6.0]: https://github.com/pR0Ps/zipstream-ng/compare/v1.5.0...v1.6.0
  [v1.7.0]: https://github.com/pR0Ps/zipstream-ng/compare/v1.6.0...v1.7.0
+ [v1.7.1]: https://github.com/pR0Ps/zipstream-ng/compare/v1.7.0...v1.7.1
