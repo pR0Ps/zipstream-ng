@@ -713,21 +713,9 @@ class ZipStream:
         for filepath in recurse(path):
             filename = os.path.relpath(filepath, path)
             filearcname = os.path.normpath(os.path.join(arcname, filename))
-
-            # Check if adding a directory, and if so, add a trailing slash
-            # (normpath will remove it). Also set the size since we're doing
-            # the stat anyway
-            st = os.stat(filepath)
-            if stat.S_ISDIR(st.st_mode):
-                filearcname += "/"
-                size = 0
-            else:
-                size = st.st_size
-
             self._enqueue(
                 path=filepath,
                 arcname=filearcname,
-                size=size,
                 compress_type=compress_type,
                 compress_level=compress_level
             )
@@ -993,15 +981,25 @@ class ZipStream:
         if self._last_modified is None or self._last_modified < mtime:
             self._last_modified = mtime
 
-        # Get the expected size of the data where not specified and possible
-        if size is None:
-            if data is not None:
-                kwargs["size"] = len(data)
-            elif path is not None:
+        # Get the expected size of the data where possible
+        if path or size is None:
+            if path:
                 if stat.S_ISDIR(st.st_mode):
                     kwargs["size"] = 0
                 else:
                     kwargs["size"] = st.st_size
+            elif data is not None:
+                kwargs["size"] = len(data)
+
+        # If adding data from a path ensure that the name matches the type of
+        # data being added.
+        if path:
+            name_is_dir = kwargs["arcname"][-1] == "/"
+            path_is_dir = stat.S_ISDIR(st.st_mode)
+            if path_is_dir and not name_is_dir:
+                kwargs["arcname"] += "/"
+            elif not path_is_dir and name_is_dir:
+                kwargs["arcname"] = kwargs["arcname"].rstrip("/")
 
         # If the ZipStream is sized then it will look at what is being added
         # and add the number of bytes used by this file to the running total
