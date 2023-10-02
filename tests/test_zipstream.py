@@ -517,6 +517,31 @@ def test_directly_adding_empty_dir(tmpdir):
     assert zinfos[0].compress_size == 0
 
 
+def test_add_path_dir_as_file(tmpdir):
+    t = tmpdir.mkdir("dir")
+    zs = ZipStream(sized=True)
+    zs.add_path(
+        t,
+        arcname="filename.txt",
+        recurse=False
+    )
+    assert zs.info_list()[0]["name"] == "filename.txt/"
+    assert len(zs) == len(bytes(zs))
+
+
+def test_add_path_file_as_dir(tmpdir):
+    t = tmpdir.join("file")
+    t.write(b"x")
+    zs = ZipStream(sized=True)
+    zs.add_path(
+        t,
+        arcname="dir/",
+        recurse=False
+    )
+    assert zs.info_list()[0]["name"] == "dir"
+    assert len(zs) == len(bytes(zs))
+
+
 def test_adding_local_dir(tmpdir):
     """Test adding files/folder from the local directory doesn't include the directory name of ."""
     t = tmpdir.mkdir("top")
