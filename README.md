@@ -161,7 +161,7 @@ stream. In this example, all that information will be added to the zip in a file
 from zipstream import ZipStream
 import json
 
-def gen_zipfile()
+def gen_zipfile():
     zs = ZipStream.from_path("/path/to/files")
     yield from zs.all_files()
     zs.add(

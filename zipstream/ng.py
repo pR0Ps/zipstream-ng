@@ -420,25 +420,20 @@ def _validate_compression(func):
 def _sanitize_arcname(arcname):
     """Terminate the arcname at the first null byte"""
     # based on zipfile._sanitize_filename
-
-    if arcname:
-        # trim the arcname to the first null byte
-        null_byte = arcname.find(chr(0))
-        if null_byte >= 0:
-            arcname = arcname[:null_byte]
-
     if not arcname:
-        raise ValueError(
-            "A valid arcname (name of the entry in the zip file) is required"
-        )
+        return ""
+
+    # trim the arcname to the first null byte
+    null_byte = arcname.find(chr(0))
+    if null_byte >= 0:
+        arcname = arcname[:null_byte]
 
     # Ensure paths in the zip always use forward slashes as the directory
-    # separator
+    # separator and strip any leading ones
     for sep in PATH_SEPARATORS:
         if sep != "/":
             arcname = arcname.replace(sep, "/")
-
-    return arcname
+    return arcname.lstrip("/")
 
 
 def _iter_file(path):
@@ -652,11 +647,14 @@ class ZipStream:
         """Queue up a path to be added to the ZipStream
 
         Queues the `path` up to to be written to the archive, giving it the
-        name provided by `arcname`. If `arcname` is not provided, it is assumed
-        to be the last component of the `path` (Ex: "/path/to/files/" -->
-        "files").
+        name provided by `arcname`.
+        If `arcname` is not provided/empty, it is assumed to be the last
+        component of the `path` (ex: "/path/to/files/" --> "files",
+        "/path/to/file.ext" --> "file.ext").
+        Using an `arcname` of `"/"` is valid when recursing - it causes all
+        the files under `path` to be added at the top level of the zip.
 
-        if `recurse` is `True` (the default), and the `path` is a directory,
+        If `recurse` is `True` (the default), and the `path` is a directory,
         all contents under the `path` will also be added. By default, this is
         done using the `walk` function in this module, which will preserve
         empty directories as well as follow symlinks to files and folders
@@ -690,12 +688,13 @@ class ZipStream:
 
         # special case - discover the arcname from the path
         if not arcname:
-            arcname = os.path.basename(path)
+            arcname = _sanitize_arcname(os.path.basename(path))
             if not arcname:
                 raise ValueError(
                     "No arcname for path '{}' could be assumed".format(path)
                 )
-        arcname = _sanitize_arcname(arcname)
+        else:
+            arcname = _sanitize_arcname(arcname)
 
         # Not recursing - just add the path
         if not recurse or not os.path.isdir(path):
@@ -712,6 +711,9 @@ class ZipStream:
 
         for filepath in recurse(path):
             filename = os.path.relpath(filepath, path)
+            # skip adding the top-level directory if the sanitized arcname is empty
+            if filename == "." and not arcname:
+                continue
             filearcname = os.path.normpath(os.path.join(arcname, filename))
             self._enqueue(
                 path=filepath,
@@ -753,6 +755,8 @@ class ZipStream:
         Raises a RuntimeError if the ZipStream has already been finalized.
         """
         arcname = _sanitize_arcname(arcname)
+        if not arcname:
+            raise ValueError("A valid arcname is required")
 
         if data is None:
             data = b""
@@ -794,6 +798,8 @@ class ZipStream:
     def mkdir(self, arcname):
         """Create a directory inside the ZipStream"""
         arcname = _sanitize_arcname(arcname)
+        if not arcname:
+            raise ValueError("A valid arcname for the directory is required")
 
         if arcname[-1] != "/":
             arcname += "/"
@@ -965,6 +971,8 @@ class ZipStream:
 
     def _enqueue(self, **kwargs):
         """Internal method to enqueue files, data, and iterables to be streamed"""
+        if not kwargs["arcname"].rstrip("/"):
+            raise ValueError("A valid arcname is required")
 
         path = kwargs.get("path")
         data = kwargs.get("data")
