@@ -475,7 +475,7 @@ def test_creating_dirs_with_data():
 def test_mkdir():
     zs = ZipStream(sized=True)
 
-    with pytest.raises(ValueError, match="A valid arcname .* is required"):
+    with pytest.raises(ValueError, match="A valid arcname for the directory is required"):
         zs.mkdir("")
 
     PATHS = (
@@ -501,20 +501,53 @@ def test_mkdir():
         assert zinfos[i].compress_size == 0
 
 
-def test_directly_adding_empty_dir(tmpdir):
+@pytest.mark.parametrize("arcname", ["/", "//", "///"])
+def test_adding_path_slash_arcname(tmpdir, arcname):
+    te = tmpdir.mkdir("empty")
+    tne = tmpdir.mkdir("not_empty")
+    f = tne.join("file")
+    f.write(b"x")
+
+    def _getinfo(z):
+        data = bytes(z)
+        assert len(data) == len(z)
+        return _get_zip(data).infolist()
+
+    # empty dir - adds nothing
+    zs = ZipStream.from_path(te, arcname=arcname)
+    assert not zs
+    zinfos = _getinfo(zs)
+    assert len(zinfos) == 0
+
+    # adds the file in the dir at the top level
+    zs = ZipStream.from_path(tne, arcname=arcname)
+    assert zs
+    zinfos = _getinfo(zs)
+    assert len(zinfos) == 1
+    assert zinfos[0].filename == "file"
+
+    with pytest.raises(ValueError, match="A valid arcname is required"):
+        ZipStream.from_path(f, arcname=arcname)
+
+
+@pytest.mark.parametrize("arcname", [None, "", ".", "/", "//", "///"])
+def test_directly_adding_empty_dir(tmpdir, arcname):
     """Test adding an empty directory"""
     t = tmpdir.mkdir("empty")
-
-    zs = ZipStream.from_path(t)
+    zs = ZipStream.from_path(t, arcname=arcname)
     data = bytes(zs)
     assert len(data) == len(zs)
 
     zinfos = _get_zip(data).infolist()
-    assert len(zinfos) == 1
-    assert zinfos[0].filename == "empty/"
-    assert zinfos[0].is_dir()
-    assert zinfos[0].file_size == 0
-    assert zinfos[0].compress_size == 0
+    if not arcname or arcname == ".":
+        assert len(zinfos) == 1
+        assert zinfos[0].filename == "{}/".format(arcname or "empty")
+        assert zinfos[0].is_dir()
+        assert zinfos[0].file_size == 0
+        assert zinfos[0].compress_size == 0
+    else:
+        # told to skip the top level with nothing under it - no data
+        assert len(zinfos) == 0
 
 
 def test_add_path_dir_as_file(tmpdir):
@@ -724,9 +757,9 @@ def test_adding_data(caplog, data, ct):
         data = b"".join(data)
 
     # Test arcname is required
-    with pytest.raises(ValueError, match="A valid arcname .* is required"):
+    with pytest.raises(ValueError, match="A valid arcname is required"):
         zs.add(tostore, None)
-    with pytest.raises(ValueError, match="A valid arcname .* is required"):
+    with pytest.raises(ValueError, match="A valid arcname is required"):
         zs.add(tostore, "")
     with pytest.raises(ValueError, match="Can't store .* as a directory"):
         zs.add(tostore, "directory/")
@@ -844,21 +877,22 @@ def test_adding_empty_name(tmpdir, monkeypatch):
     """Test that when trying to discover an arcname for a path empty names raise an error"""
     monkeypatch.setattr(os.path, "basename", lambda _: "")
     zs = ZipStream(sized=True)
-    with pytest.raises(ValueError, match="No arcname for path"):
-        zs.add_path(tmpdir)
-    with pytest.raises(ValueError, match="No arcname for path"):
-        zs.add_path(tmpdir, arcname="")
+    for recurse in (False, True):
+        with pytest.raises(ValueError, match="No arcname for path .* could be assumed"):
+            zs.add_path(tmpdir, recurse=recurse)
+        with pytest.raises(ValueError, match="No arcname for path .* could be assumed"):
+            zs.add_path(tmpdir, arcname="", recurse=recurse)
 
 
 def test_adding_null_byte_name():
     zs = ZipStream(sized=True)
 
     zs.add(b"data", "file.txt\x00and more")
-    with pytest.raises(ValueError, match="A valid arcname .* is required"):
+    with pytest.raises(ValueError, match="A valid arcname is required"):
         zs.add(b"otherdata", "\x00nofilename")
 
     zs.mkdir("directory\x00and more")
-    with pytest.raises(ValueError, match="A valid arcname .* is required"):
+    with pytest.raises(ValueError, match="A valid arcname for the directory is required"):
         zs.mkdir("\x00nodirectory")
 
     expected_len = len(zs)
