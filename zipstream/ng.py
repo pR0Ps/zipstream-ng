@@ -33,6 +33,11 @@ from zipfile import (
 )
 
 
+# Constants for compatibility modes
+PY313_COMPAT = sys.version_info < (3, 14)  # disable zstd
+PY36_COMPAT = sys.version_info < (3, 7)  # disable compress_level
+PY35_COMPAT = sys.version_info < (3, 6)  # backport ZipInfo functions, stringify path-like objects
+
 # Size of chunks to read out of files
 # Note that when compressing data the compressor will operate on bigger chunks
 # than this - it keeps a cache as new chunks are fed to it.
@@ -51,16 +56,22 @@ ZIP64_ESTIMATE_FACTOR = 1.05
 # (includes "/" regardless of platform as per ZIP format specification)
 PATH_SEPARATORS = set(x for x in (os.sep, os.altsep, "/") if x)
 
-# Constants for compatibility modes
-PY36_COMPAT = sys.version_info < (3, 7)  # disable compress_level
-PY35_COMPAT = sys.version_info < (3, 6)  # backport ZipInfo functions, stringify path-like objects
+# zstd-related constants
+if not PY313_COMPAT:
+    from zipfile import ZIP_ZSTANDARD, ZSTANDARD_VERSION
+    from compression.zstd import CompressionParameter
+    ZSTD_LEVEL_BOUNDS = CompressionParameter.compression_level.bounds()
 
 
 __all__ = [
     # Defined classes
     "ZipStream", "ZipStreamInfo",
     # Compression constants (imported from zipfile)
-    "ZIP_STORED", "ZIP_DEFLATED", "BZIP2_VERSION", "ZIP_BZIP2", "LZMA_VERSION", "ZIP_LZMA",
+    "ZIP_STORED",
+    "ZIP_DEFLATED",
+    "ZIP_BZIP2", "BZIP2_VERSION",
+    "ZIP_LZMA", "LZMA_VERSION",
+    *(["ZIP_ZSTANDARD", "ZSTANDARD_VERSION"] if not PY313_COMPAT else []),
     # Helper functions
     "walk"
 ]
@@ -93,6 +104,24 @@ def _check_compression(compress_type, compress_level):
             raise ValueError(
                 "compress_level must be between 1 and 9 when using ZIP_BZIP2"
             )
+    elif not PY313_COMPAT and compress_type == ZIP_ZSTANDARD:
+        if not ZSTD_LEVEL_BOUNDS[0] <= compress_level <= ZSTD_LEVEL_BOUNDS[1]:
+            raise ValueError(
+                "compress_level must be between {} and {} when using ZIP_ZSTANDARD".format(
+                    *ZSTD_LEVEL_BOUNDS
+                )
+            )
+
+
+def _min_version_for_compress_type(compress_type, min_version=0):
+    """Ensure the compress_type is supported by the min_version"""
+    if compress_type == ZIP_BZIP2:
+        min_version = max(BZIP2_VERSION, min_version)
+    elif compress_type == ZIP_LZMA:
+        min_version = max(LZMA_VERSION, min_version)
+    elif not PY313_COMPAT and compress_type == ZIP_ZSTANDARD:
+        min_version = max(ZSTANDARD_VERSION, min_version)
+    return min_version
 
 
 def _timestamp_to_dos(ts):
@@ -177,11 +206,7 @@ class ZipStreamInfo(ZipInfo):
             file_size = 0xFFFFFFFF
             compress_size = 0xFFFFFFFF
 
-        if self.compress_type == ZIP_BZIP2:
-            min_version = max(BZIP2_VERSION, min_version)
-        elif self.compress_type == ZIP_LZMA:
-            min_version = max(LZMA_VERSION, min_version)
-
+        min_version = _min_version_for_compress_type(self.compress_type, min_version)
         self.extract_version = max(min_version, self.extract_version)
         self.create_version = max(min_version, self.create_version)
         filename, flag_bits = self._encodeFilenameFlags()
@@ -315,11 +340,7 @@ class ZipStreamInfo(ZipInfo):
             ) + extra_data
             min_version = ZIP64_VERSION
 
-        if self.compress_type == ZIP_BZIP2:
-            min_version = max(BZIP2_VERSION, min_version)
-        elif self.compress_type == ZIP_LZMA:
-            min_version = max(LZMA_VERSION, min_version)
-
+        min_version = _min_version_for_compress_type(self.compress_type, min_version)
         extract_version = max(min_version, self.extract_version)
         create_version = max(min_version, self.create_version)
         filename, flag_bits = self._encodeFilenameFlags()
@@ -502,19 +523,24 @@ class ZipStream:
 
         compress_type:
             The ZIP compression method to use when writing the archive, and
-            should be ZIP_STORED, ZIP_DEFLATED, ZIP_BZIP2 or ZIP_LZMA;
-            unrecognized values will cause NotImplementedError to be raised. If
-            ZIP_DEFLATED, ZIP_BZIP2 or ZIP_LZMA is specified but the
-            corresponding module (zlib, bz2 or lzma) is not available,
-            RuntimeError is raised. The default is ZIP_STORED.
+            should be ZIP_STORED, ZIP_DEFLATED, ZIP_BZIP2, ZIP_LZMA, or
+            ZIP_ZSTANDARD (Python 3.14+); unrecognized values will cause
+            NotImplementedError to be raised.
+            If ZIP_DEFLATED, ZIP_BZIP2, ZIP_LZMA, or ZIP_ZSTANDARD is specified
+            but the corresponding module (zlib, bz2, lzma, or compression.zstd)
+            is not available, RuntimeError is raised. The default is ZIP_STORED.
 
         compress_level:
             Controls the compression level to use when writing files to the
-            archive. When using ZIP_STORED or ZIP_LZMA it has no effect. When
-            using ZIP_DEFLATED integers 0 through 9 are accepted (see zlib for
-            more information). When using ZIP_BZIP2 integers 1 through 9 are
-            accepted (see bz2 for more information). Raises a ValueError if the
-            provided value isn't valid for the `compress_type`.
+            archive. When using ZIP_STORED or ZIP_LZMA it has no effect.
+            When using ZIP_DEFLATED integers 0 through 9 are accepted (see zlib
+            for more information).
+            When using ZIP_BZIP2 integers 1 through 9 are accepted (see bz2 for
+            more information).
+            When using ZIP_ZSTANDARD integers -7 though 22 are common (see
+            compression.zstd.CompressionParameter for more information).
+            Raises a ValueError if the provided value isn't valid for the
+            `compress_type`.
 
             Only available in Python 3.7+ (raises a ValueError if used on a
             lower version)
