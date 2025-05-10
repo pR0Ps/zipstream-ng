@@ -83,14 +83,16 @@ def _check_compression(compress_type, compress_level):
         __log__.warning(
             "compress_level has no effect when using ZIP_STORED/ZIP_LZMA"
         )
-    elif compress_type == ZIP_DEFLATED and not 0 <= compress_level <= 9:
-        raise ValueError(
-            "compress_level must be between 0 and 9 when using ZIP_DEFLATED"
-        )
-    elif compress_type == ZIP_BZIP2 and not 1 <= compress_level <= 9:
-        raise ValueError(
-            "compress_level must be between 1 and 9 when using ZIP_BZIP2"
-        )
+    elif compress_type == ZIP_DEFLATED:
+        if not 0 <= compress_level <= 9:
+            raise ValueError(
+                "compress_level must be between 0 and 9 when using ZIP_DEFLATED"
+            )
+    elif compress_type == ZIP_BZIP2:
+        if not 1 <= compress_level <= 9:
+            raise ValueError(
+                "compress_level must be between 1 and 9 when using ZIP_BZIP2"
+            )
 
 
 def _timestamp_to_dos(ts):
