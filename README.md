@@ -14,6 +14,7 @@ calculate the final size of the zip file before streaming it.
  - Can calculate the total size of the resulting zip file before generation even begins.
  - Low memory usage: Since the zip is generated as it's requested, very little has to be kept in
    memory (peak usage of less than 20MB is typical, even for TBs of files).
+ - Performant: On-par or faster than using the standard library to create non-streamed zip files.
  - Flexible API: Typical use cases are simple, complicated ones are possible.
  - Supports zipping data from files, bytes, strings, and any other iterable objects.
  - Keeps track of the date of the most recently modified file added to the zip file.
