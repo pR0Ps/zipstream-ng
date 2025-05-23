@@ -19,8 +19,8 @@ from zipfile import (
     ZipInfo,
     # Constants
     ZIP_STORED, ZIP64_LIMIT, ZIP_FILECOUNT_LIMIT, ZIP_MAX_COMMENT,
-    ZIP64_VERSION, BZIP2_VERSION, ZIP_BZIP2, LZMA_VERSION, ZIP_LZMA,
-    ZIP_DEFLATED,
+    DEFAULT_VERSION, ZIP64_VERSION, BZIP2_VERSION,
+    ZIP_BZIP2, LZMA_VERSION, ZIP_LZMA, ZIP_DEFLATED,
     # Byte sequence constants
     structFileHeader, structCentralDir, structEndArchive64, structEndArchive,
     structEndArchive64Locator, stringFileHeader, stringCentralDir,
@@ -42,6 +42,10 @@ PY35_COMPAT = sys.version_info < (3, 6)  # backport ZipInfo functions, stringify
 _FLAG_LZMA_EOS_MARKER = 1 << 1
 _FLAG_DATA_DESCRIPTOR = 1 << 3
 _FLAG_IS_DIRECTORY = 1 << 4
+_FLAG_UTF8_FILENAME = 1 << 11
+
+# The id of the creating system (assume everything other than Windows is unix-y)
+_DEFAULT_CREATE_SYSTEM = 0 if sys.platform == "win32" else 3
 
 # Size of chunks to read out of files
 # Note that when compressing data the compressor will operate on bigger chunks
@@ -137,13 +141,79 @@ def _timestamp_to_dos(ts):
     )
 
 
-class ZipStreamInfo(ZipInfo):
-    """A ZipInfo subclass that always uses a data descriptor to store filesize data"""
+import enum
+class _DataSrc(enum.Enum):
+    PATH = 1
+    ITERABLE = 2
+    LITERAL = 3
 
-    def __init__(self, filename, date_time=None):
-        # Default the date_time to the current local time and automatically
-        # clamp it to the range that the zip format supports.
-        date_time = date_time or time.localtime()[0:6]
+
+class ZipStreamInfo:
+    """A ZipInfo-like class that always uses a data descriptor to store filesize data"""
+
+    __slots__ = (
+        "arcname",
+        "date_time",
+        "compress_type",
+        "compress_level",
+        "comment",
+        "create_system",
+        "create_version",
+        "extract_version",
+        "flag_bits",
+        "external_attr",
+        "header_offset",
+        "CRC",
+        "compress_size",
+        "file_size",
+        "_data_src",
+        "_data",
+    )
+
+    def __init__(self, *, path=None, data=None, iterable=None, size=None, arcname, compress_type=None, compress_level=None):
+        if not (arcname or "").rstrip("/"):
+            raise ValueError("A valid arcname is required")
+        if not (bool(path) ^ bool(iterable) ^ bool(data is not None)):
+            raise ValueError("Provide one of path, iterable, or data")
+
+        if path is not None:
+            self._data_src = _DataSrc.PATH
+            self._data = path
+        elif iterable is not None:
+            self._data_src = _DataSrc.ITERABLE
+            self._data = iterable
+        elif data is not None:
+            self._data_src = _DataSrc.LITERAL
+            self._data = data
+        else:
+            assert False  # checked earlier
+        assert self._data is not None
+
+        # TODO: clean up arcname/filename confusion
+
+        self.flag_bits = 0                    # ZIP flag bits
+        self.filename = arcname               # Normalized file name (sets arcname and utf8 flag bit if needed)
+        self.compress_type = compress_type    # Type of compression for the file
+        self.compress_level = compress_level  # Level for the compressor
+        self.comment = b""                    # Comment for each file
+        self.create_system = _DEFAULT_CREATE_SYSTEM  # System which created ZIP archive
+        self.create_version = DEFAULT_VERSION  # Version which created ZIP archive
+        self.extract_version = DEFAULT_VERSION  # Version needed to extract archive
+        self.external_attr = 0          # External file attributes
+        self.compress_size = None       # Size of the compressed file
+        self.file_size = size           # Size of the uncompressed file
+        self.header_offset = None       # The offset of the FileHeader in the stream
+
+        if self._data_src is _DataSrc.PATH:
+            st = os.stat(self._data)
+        else:
+            st = None
+
+        # Get the modified time of the added path (use current time for
+        # non-paths) and automatically clamp it to the range that the zip
+        # format supports.
+        # TODO: support custom times in the future
+        date_time = time.localtime(st.st_mtime if st is not None else None)[0:6]
         if not (MIN_DATE <= date_time <= MAX_DATE):
             __log__.warning(
                 "Date of %s is outside of the supported range for zip files"
@@ -151,8 +221,62 @@ class ZipStreamInfo(ZipInfo):
                 date_time
             )
             date_time = min(max(MIN_DATE, date_time), MAX_DATE)
+        self.date_time = date_time
 
-        super().__init__(filename, date_time)
+        # Get attributes from the filesystem where possible
+        if st is not None:
+            self.external_attr = (st.st_mode & 0xFFFF) << 16  # Unix attributes
+
+            # Ensure the arcname matches the type of data being added
+            name_is_dir = self.is_dir()
+            if stat.S_ISDIR(st.st_mode):
+                self.external_attr |= _FLAG_IS_DIRECTORY
+                self.file_size = 0
+                if not name_is_dir:
+                    self.filename = arcname + "/"
+            else:
+                self.external_attr &= ~_FLAG_IS_DIRECTORY
+                self.file_size = st.st_size
+                if name_is_dir:
+                    self.filename = arcname.rstrip("/")
+        else:
+            # Get size from data where possible
+            if self._data_src is _DataSrc.LITERAL and self.file_size is None:
+                self.file_size = len(self._data)
+
+            # Set the external attributes in the same was a ZipFile.writestr
+            if self.is_dir():
+                self.external_attr = 0o40775 << 16  # drwxrwxr-x
+                self.external_attr |= _FLAG_IS_DIRECTORY
+            else:
+                self.external_attr = 0o00600 << 16  # ?rw-------
+
+        # No compression for dirs
+        if self.is_dir():
+            self.compress_type = ZIP_STORED
+            self.compress_level = None
+
+    @property
+    def filename(self):
+        return self.arcname.decode(
+            "utf-8" if self.flag_bits & _FLAG_UTF8_FILENAME else "ascii"
+        )
+
+    @filename.setter
+    def filename(self, value):
+        try:
+            self.arcname = value.encode("ascii")
+            self.flag_bits &= ~_FLAG_UTF8_FILENAME
+        except UnicodeEncodeError:
+            self.arcname = value.encode("utf-8")
+            self.flag_bits |= _FLAG_UTF8_FILENAME
+
+    def ensure_sized(self):
+        if self._data_src is _DataSrc.ITERABLE and self.file_size is None:
+            # Iterate the iterable data to get the size and replace it with the static data
+            self._data = b"".join(self._data)
+            self._data_src = _DataSrc.LITERAL
+            self.file_size = len(self._data)
 
     def DataDescriptor(self, zip64):
         """Return the data descriptor for the file entry"""
@@ -197,7 +321,7 @@ class ZipStreamInfo(ZipInfo):
             file_size = self.file_size
 
         min_version = 0
-        extra = self.extra
+        extra = b""  # TODO: support arbitrary extras?
         if zip64:
             min_version = ZIP64_VERSION
             extra += struct.pack(
@@ -214,25 +338,38 @@ class ZipStreamInfo(ZipInfo):
         min_version = _min_version_for_compress_type(self.compress_type, min_version)
         self.extract_version = max(min_version, self.extract_version)
         self.create_version = max(min_version, self.create_version)
-        filename, flag_bits = self._encodeFilenameFlags()
         header = struct.pack(
             structFileHeader,
             stringFileHeader,
             self.extract_version,
-            self.reserved,
-            flag_bits,
+            0,  # reserved - must be 0
+            self.flag_bits,
             self.compress_type,
             dostime,
             dosdate,
             CRC,
             compress_size,
             file_size,
-            len(filename),
+            len(self.arcname),
             len(extra)
         )
-        return header + filename + extra
+        return header + self.arcname + extra
 
-    def _file_data(self, iterable=None, force_zip64=False):
+    def _data_iterator(self):
+        """Convert the data into an iterable"""
+        if self.is_dir():
+            return None
+
+        if self._data_src is _DataSrc.PATH:
+            return _iter_file(self._data)
+        elif self._data_src is _DataSrc.ITERABLE:
+            return self._data
+        elif self._data_src is _DataSrc.LITERAL:
+            def gen():
+                yield self._data
+            return gen()
+
+    def _file_data(self, force_zip64=False):
         """Given an iterable of file data, yield a local file header and file
         data for it.
 
@@ -240,7 +377,6 @@ class ZipStreamInfo(ZipInfo):
         always be used for storing files (not directories).
         """
         # Based on the code in zipfile.ZipFile.write, zipfile._ZipWriteFile.{write,close}
-
         if self.compress_type == ZIP_LZMA:
             # Compressed LZMA data includes an end-of-stream (EOS) marker
             self.flag_bits |= _FLAG_LZMA_EOS_MARKER
@@ -254,6 +390,7 @@ class ZipStreamInfo(ZipInfo):
             yield self.FileHeader(zip64=False)
             return
 
+        iterable = self._data_iterator()
         if not iterable:  # pragma: no cover
             raise ValueError("Not a directory but no data given to encode")
 
@@ -269,7 +406,7 @@ class ZipStreamInfo(ZipInfo):
 
         # Store/compress the data while keeping track of size and CRC
         if not PY36_COMPAT:
-            cmpr = _get_compressor(self.compress_type, self._compresslevel)
+            cmpr = _get_compressor(self.compress_type, self.compress_level)
         else:
             cmpr = _get_compressor(self.compress_type)
         crc = 0
@@ -332,7 +469,7 @@ class ZipStreamInfo(ZipInfo):
         else:
             header_offset = self.header_offset
 
-        extra_data = self.extra
+        extra_data = b""  # TODO: support adding arbitrary extras?
         min_version = 0
         if extra:
             # Append a Zip64 field to the extra's
@@ -340,44 +477,45 @@ class ZipStreamInfo(ZipInfo):
             # zip64 records here first - since we control the generation of
             # ZipStreamInfo records, there shouldn't ever be any so we don't
             # bother.
+            num_extras = len(extra)
             extra_data = struct.pack(
-                "<HH" + "Q"*len(extra), 1, 8*len(extra), *extra
+                "<HH{}Q".format(num_extras),
+                1,
+                8*num_extras,
+                *extra,
             ) + extra_data
             min_version = ZIP64_VERSION
 
         min_version = _min_version_for_compress_type(self.compress_type, min_version)
         extract_version = max(min_version, self.extract_version)
         create_version = max(min_version, self.create_version)
-        filename, flag_bits = self._encodeFilenameFlags()
         centdir = struct.pack(
             structCentralDir,
             stringCentralDir,
             create_version,
             self.create_system,
             extract_version,
-            self.reserved,
-            flag_bits,
+            0,  # reserved - must be 0
+            self.flag_bits,
             self.compress_type,
             dostime,
             dosdate,
             self.CRC,
             compress_size,
             file_size,
-            len(filename),
+            len(self.arcname),
             len(extra_data),
             len(self.comment),
             0,  # disk number this file begins on
-            self.internal_attr,
+            0,  # internal attributes - unused
             self.external_attr,
             header_offset
         )
-        return centdir + filename + extra_data + self.comment
+        return centdir + self.arcname + extra_data + self.comment
 
-    if PY35_COMPAT:  # pragma: no cover
-        # Backport the is_dir function introduced in 3.6
-        def is_dir(self):
-            """Return True if this archive member is a directory."""
-            return self.filename[-1] == '/'
+    def is_dir(self):
+        """Return True if this archive member is a directory."""
+        return self.arcname[-1] == 47  # "/" in both utf-8 and ascii
 
 
 def _validate_final(func):
@@ -482,67 +620,6 @@ def walk(path, preserve_empty=True, followlinks=True):
 
         for f in files:
             yield os.path.join(dirpath, f)
-
-
-class _ZipEntry:
-    """Holds structured data for an entry to add to the zip file"""
-
-    __slots__ = ("path", "data", "iterable", "size", "arcname", "date_time", "compress_type", "compress_level")
-
-    def __init__(self, *, path=None, data=None, iterable=None, size=None, arcname, compress_type=None, compress_level=None):
-        if not (arcname or "").rstrip("/"):
-            raise ValueError("A valid arcname is required")
-        if not (bool(path) ^ bool(iterable) ^ bool(data is not None)):
-            raise ValueError("Provide one of path, iterable, or data")
-
-        self.arcname = arcname
-        self.path = path
-        self.data = data
-        self.size = size
-        self.iterable = iterable
-        self.compress_type = compress_type
-        self.compress_level = compress_level
-
-        if self.path:
-            st = os.stat(self.path)
-        else:
-            st = None
-
-        # Get the modified time of the added path (use current time for non-paths)
-        self.date_time = time.localtime(st.st_mtime if st is not None else None)[0:6]
-
-        # Get the expected size of the data where possible
-        if self.path:
-            # Ensure the arcname matches the type of data being added
-            name_is_dir = self.arcname[-1] == "/"
-            if stat.S_ISDIR(st.st_mode):
-                self.size = 0
-                if not name_is_dir:
-                    self.arcname += "/"
-            else:
-                self.size = st.st_size
-                if name_is_dir:
-                    self.arcname = self.arcname.rstrip("/")
-        elif self.data is not None and self.size is None:
-            self.size = len(self.data)
-
-        # directories are always stored
-        if self.arcname[-1] == "/":
-            self.compress_type = ZIP_STORED
-            self.compress_level = None
-
-    def ensure_size(self):
-        if self.iterable is not None and self.size is None:
-            # Iterate the iterable data to get the size and replace it with the static data
-            self.data = b"".join(self.iterable)
-            self.iterable = None
-            self.size = len(self.data)
-
-    def __repr__(self):
-        return "<{}({})>".format(
-            type(self).__name__,
-            ", ".join("{}={!r}".format(k, getattr(self, k)) for k in self.__slots__)
-        )
 
 
 class ZipStream:
@@ -666,7 +743,7 @@ class ZipStream:
             return False
 
         try:
-            entry = self._queue.popleft()
+            zinfo = self._queue.popleft()
         except IndexError:
             return False
 
@@ -675,7 +752,7 @@ class ZipStream:
         # first will cause corrupted streams. Prevent this by adding a lock
         # around the functions that actually generate data.
         with self._gen_lock:
-            yield from self._gen_file_entry(entry)
+            yield from self._gen_file_entry(zinfo)
         return True
 
     def all_files(self):
@@ -953,24 +1030,24 @@ class ZipStream:
                     "is_dir": x.is_dir(),
                     "CRC": x.CRC,
                     "compress_type": x.compress_type,
-                    "compress_level": getattr(x, "_compresslevel", None),  # <3.7 compat
+                    "compress_level": x.compress_level,
                     "streamed": True,
                 }
                 for x in self._filelist
             ]
             for x in self._queue:
-                is_dir = x.arcname[-1] == "/"
+                is_dir = x.is_dir()
                 compress_type = x.compress_type if x.compress_type is not None else self._compress_type
                 if is_dir:
                     compress_size = 0
                 elif compress_type == ZIP_STORED:
-                    compress_size = x.size
+                    compress_size = x.file_size
                 else:
                     compress_size = None
 
                 info.append({
-                    "name": x.arcname,
-                    "size": x.size,
+                    "name": x.filename,
+                    "size": x.file_size,
                     "compressed_size": compress_size,
                     "datetime": x.date_time,
                     "is_dir": is_dir,
@@ -1002,7 +1079,7 @@ class ZipStream:
                 "datetime": datetime.datetime(*x.date_time).isoformat(),
                 "CRC": x.CRC,
                 "compress_type": x.compress_type,
-                "compress_level": getattr(x, "_compresslevel", None),  # <3.7 compat
+                "compress_level": x.compress_level,
                 "extract_version": x.extract_version,
             }
             for x in self._filelist
@@ -1041,85 +1118,57 @@ class ZipStream:
         if compress_level == self._compress_level:
             compress_level = None
 
-        entry = _ZipEntry(compress_type=compress_type, compress_level=compress_level, **kwargs)
+        zinfo = ZipStreamInfo(compress_type=compress_type, compress_level=compress_level, **kwargs)
 
         # Update the last_modified property
-        if self._last_modified is None or self._last_modified < entry.date_time:
-            self._last_modified = entry.date_time
+        if self._last_modified is None or self._last_modified < zinfo.date_time:
+            self._last_modified = zinfo.date_time
 
         # If the ZipStream is sized then it will look at what is being added
         # and add the number of bytes used by this file to the running total
         # length of the stream. It will also read any iterables fully into
         # memory so their size is known.
         if self._sized:
-            if entry.compress_type:
+            if zinfo.compress_type:
                 raise ValueError("Cannot use compression with a sized ZipStream")
 
-            entry.ensure_size()
-            self._add_size_from_file(entry.arcname, entry.size)
+            zinfo.ensure_sized()
+            self._add_size_from_file(zinfo)
 
-        self._queue.append(entry)
+        self._queue.append(zinfo)
 
     def _track(self, data):
         """Data passthrough with byte counting"""
         self._pos += len(data)
         return data
 
-    def _gen_file_entry(self, entry):
+    def _gen_file_entry(self, zinfo):
         """Yield the zipped data generated by the specified path/iterator/data"""
-        assert not (self._sized and entry.size is None)
+        assert not (self._sized and zinfo.file_size is None)
 
-        zinfo = ZipStreamInfo(entry.arcname, date_time=entry.date_time)
-        if entry.path:
-            # Set attributes in the same way as ZipInfo.from_file
-            # TODO: cache the mode up front to avoid the extra stat?
-            zinfo.external_attr = (os.stat(entry.path).st_mode & 0xFFFF) << 16  # Unix attributes
-            if zinfo.is_dir():
-                zinfo.external_attr |= 0x10  # MS-DOS directory flag
-        else:
-            # Set the external attributes in the same way as ZipFile.writestr
-            if zinfo.is_dir():
-                zinfo.external_attr = 0o40775 << 16  # drwxrwxr-x
-                zinfo.external_attr |= _FLAG_IS_DIRECTORY
-            else:
-                zinfo.external_attr = 0o600 << 16  # ?rw-------
-
-        if entry.size is not None:
-            zinfo.file_size = entry.size
-
-        zinfo.compress_type = entry.compress_type if entry.compress_type is not None else self._compress_type
+        if zinfo.compress_type is None:
+            zinfo.compress_type = self._compress_type
         if not PY36_COMPAT:
             if zinfo.compress_type in (ZIP_STORED, ZIP_LZMA):
                 # Make sure the zinfo properties are accurate for info_list
-                zinfo._compresslevel = None
-            else:
-                zinfo._compresslevel = entry.compress_level if entry.compress_level is not None else self._compress_level
+                zinfo.compress_level = None
+            elif zinfo.compress_level is None:
+                zinfo.compress_level = self._compress_level
 
         # Store the position of the header
         zinfo.header_offset = self._pos
 
         # We need to force using zip64 extensions for unsized iterables since
         # we don't know how big they'll end up being.
-        force_zip64 = entry.iterable is not None and entry.size is None
+        force_zip64 = zinfo._data_src is _DataSrc.ITERABLE and zinfo.file_size is None
 
-        # Convert paths and data into iterables
-        if entry.path is not None:
-            if zinfo.is_dir():
-                iterable = None
-            else:
-                iterable = _iter_file(entry.path)
-        elif entry.data is not None:
-            def gen():
-                yield entry.data
-            iterable = gen()
-        else:
-            iterable = entry.iterable
+        predicted_size = zinfo.file_size
 
         # Generate the file data
-        for x in zinfo._file_data(iterable, force_zip64=force_zip64):
+        for x in zinfo._file_data(force_zip64=force_zip64):
             yield self._track(x)
 
-        if entry.size is not None and entry.size != zinfo.file_size:
+        if predicted_size is not None and predicted_size != zinfo.file_size:
             # The size of the data that was stored didn't match what was
             # expected. Note that this still produces a valid zip file, just
             # one with a different amount of data than was expected.
@@ -1127,14 +1176,14 @@ class ZipStream:
             # actual size will no longer match the calculated size.
             __log__.warning(
                 "Size mismatch when adding data for '%s' (expected %d bytes, got %d)",
-                entry.arcname,
-                entry.size,
+                zinfo.filename,
+                predicted_size,
                 zinfo.file_size
             )
             if self._sized:
                 raise RuntimeError(
                     "Error adding '{}' to sized ZipStream - "
-                    "actual size did not match the computed size".format(entry.arcname)
+                    "actual size did not match the computed size".format(zinfo.filename)
                 )
 
         self._filelist.append(zinfo)
@@ -1149,6 +1198,9 @@ class ZipStream:
         # Write central directory file headers
         centDirOffset = self._pos
         for zinfo in self._filelist:
+            if self._sized and zinfo.comment:
+                __log__.warning("File comments not currently supported in sized ZipStreams - removing it")
+                zinfo.comment = b""
             yield self._track(zinfo._central_directory_header_data())
 
         # Write end of central directory record
@@ -1200,8 +1252,10 @@ class ZipStream:
         )
         yield self._track(endRec + self._comment)
 
-    def _add_size_from_file(self, arcname, size):
-        """Add the file to the calculated size of the ZipStream"""
+    def _add_size_from_file(self, zinfo):
+        """Add the ZipStreamInfo to the calculated size of the ZipStream"""
+
+        arcname_len = len(zinfo.arcname)
 
         # Need to prevent multiple threads from reading _size_prog, calculating
         # independently, then all writing back conflicting progress.
@@ -1211,16 +1265,9 @@ class ZipStream:
             # exceeding a limit.
             (num_files, files_size, cdfh_size) = self._size_prog
 
-            # Get the number of bytes the arcname uses by encoding it in
-            # the same way that ZipStreamInfo._encodeFilenameFlags does
-            try:
-                arcname_len = len(arcname.encode("ascii"))
-            except UnicodeEncodeError:
-                arcname_len = len(arcname.encode("utf-8"))
-
             # Calculate if zip64 extensions are required in the same way that
-            # ZipStreamInfo.file_data does
-            uses_zip64 = size * ZIP64_ESTIMATE_FACTOR > ZIP64_LIMIT
+            # ZipStreamInfo does
+            uses_zip64 = zinfo.file_size * ZIP64_ESTIMATE_FACTOR > ZIP64_LIMIT
 
             # Track the number of extra records in the central directory file
             # header encoding this file will require
@@ -1232,10 +1279,10 @@ class ZipStream:
                 cdfh_extras += 1
 
             # FileHeader
-            files_size += sizeFileHeader + arcname_len # 30 + name len
+            files_size += sizeFileHeader + arcname_len  # 30 + name len
 
             # Folders don't have any data or require any extra records
-            if arcname[-1] != "/":
+            if not zinfo.is_dir():
 
                 # When using zip64, the size and compressed size of the file are
                 # written as an extra field in the FileHeader.
@@ -1243,14 +1290,14 @@ class ZipStream:
                     files_size += 20  # struct.calcsize('<HHQQ')
 
                 # file data
-                files_size += size
+                files_size += zinfo.file_size
 
                 # DataDescriptor
                 files_size += 24 if uses_zip64 else 16  # struct.calcsize('<LLQQ' if zip64 else '<LLLL')
 
                 # Storing the size of a large file requires 2 extra records
                 # (size and compressed size)
-                if size > ZIP64_LIMIT:
+                if zinfo.file_size > ZIP64_LIMIT:
                     cdfh_extras += 2
 
             cdfh_size += sizeCentralDir  # 46
