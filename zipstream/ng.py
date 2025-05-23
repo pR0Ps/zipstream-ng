@@ -340,7 +340,7 @@ class ZipStreamInfo(ZipInfo):
             len(filename),
             len(extra_data),
             len(self.comment),
-            0,
+            0,  # disk number this file begins on
             self.internal_attr,
             self.external_attr,
             header_offset
@@ -1131,22 +1131,27 @@ class ZipStream:
             centDirOffset > ZIP64_LIMIT or
             centDirSize > ZIP64_LIMIT
         ):
-            # Need to write the Zip64 end-of-archive records
+            # Need to also write a Zip64 end-of-archive record
             zip64EndRec = struct.pack(
                 structEndArchive64,
                 stringEndArchive64,
-                44, 45, 45, 0, 0,
+                44,  # size of this record after this point
+                     # (note: no "zip extensible data" is added so this is a constant)
+                45,  # version made by (Zip64 support)
+                45,  # version needed to extract (Zip64 support)
+                0,  # disk number this record is on
+                0,  # disk number that contains the start of the central directory
                 centDirCount,
                 centDirCount,
                 centDirSize,
-                centDirOffset
+                centDirOffset,
             )
             zip64LocRec = struct.pack(
                 structEndArchive64Locator,
                 stringEndArchive64Locator,
-                0,
+                0,  # disk number where the zip64EndRec starts
                 zip64EndRecStart,
-                1
+                1,  # total number of disks
             )
             yield self._track(zip64EndRec + zip64LocRec)
 
@@ -1157,7 +1162,8 @@ class ZipStream:
         endRec = struct.pack(
             structEndArchive,
             stringEndArchive,
-            0, 0,
+            0,  # disk number this record is on
+            0,  # disk number that contains the start of the central directory
             centDirCount,
             centDirCount,
             centDirSize,
