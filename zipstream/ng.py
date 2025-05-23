@@ -374,38 +374,7 @@ class ZipStreamInfo(ZipInfo):
         return centdir + filename + extra_data + self.comment
 
     if PY35_COMPAT:  # pragma: no cover
-        # Backport essential functions introduced in 3.6
-
-        @classmethod
-        def from_file(cls, filename, arcname=None):
-            """Construct an appropriate ZipInfo for a file on the filesystem.
-            filename should be the path to a file or directory on the filesystem.
-            arcname is the name which it will have within the archive (by default,
-            this will be the same as filename, but without a drive letter and with
-            leading path separators removed).
-            """
-            st = os.stat(filename)
-            isdir = stat.S_ISDIR(st.st_mode)
-            mtime = time.localtime(st.st_mtime)
-            date_time = mtime[0:6]
-            # Create ZipInfo instance to store file information
-            if arcname is None:
-                arcname = filename
-            arcname = os.path.normpath(os.path.splitdrive(arcname)[1])
-            while arcname[0] in (os.sep, os.altsep):
-                arcname = arcname[1:]
-            if isdir:
-                arcname += '/'
-            zinfo = cls(arcname, date_time)
-            zinfo.external_attr = (st.st_mode & 0xFFFF) << 16  # Unix attributes
-            if isdir:
-                zinfo.file_size = 0
-                zinfo.external_attr |= _FLAG_IS_DIRECTORY
-            else:
-                zinfo.file_size = st.st_size
-
-            return zinfo
-
+        # Backport the is_dir function introduced in 3.6
         def is_dir(self):
             """Return True if this archive member is a directory."""
             return self.filename[-1] == '/'
@@ -513,6 +482,67 @@ def walk(path, preserve_empty=True, followlinks=True):
 
         for f in files:
             yield os.path.join(dirpath, f)
+
+
+class _ZipEntry:
+    """Holds structured data for an entry to add to the zip file"""
+
+    __slots__ = ("path", "data", "iterable", "size", "arcname", "date_time", "compress_type", "compress_level")
+
+    def __init__(self, *, path=None, data=None, iterable=None, size=None, arcname, compress_type=None, compress_level=None):
+        if not (arcname or "").rstrip("/"):
+            raise ValueError("A valid arcname is required")
+        if not (bool(path) ^ bool(iterable) ^ bool(data is not None)):
+            raise ValueError("Provide one of path, iterable, or data")
+
+        self.arcname = arcname
+        self.path = path
+        self.data = data
+        self.size = size
+        self.iterable = iterable
+        self.compress_type = compress_type
+        self.compress_level = compress_level
+
+        if self.path:
+            st = os.stat(self.path)
+        else:
+            st = None
+
+        # Get the modified time of the added path (use current time for non-paths)
+        self.date_time = time.localtime(st.st_mtime if st is not None else None)[0:6]
+
+        # Get the expected size of the data where possible
+        if self.path:
+            # Ensure the arcname matches the type of data being added
+            name_is_dir = self.arcname[-1] == "/"
+            if stat.S_ISDIR(st.st_mode):
+                self.size = 0
+                if not name_is_dir:
+                    self.arcname += "/"
+            else:
+                self.size = st.st_size
+                if name_is_dir:
+                    self.arcname = self.arcname.rstrip("/")
+        elif self.data is not None and self.size is None:
+            self.size = len(self.data)
+
+        # directories are always stored
+        if self.arcname[-1] == "/":
+            self.compress_type = ZIP_STORED
+            self.compress_level = None
+
+    def ensure_size(self):
+        if self.iterable is not None and self.size is None:
+            # Iterate the iterable data to get the size and replace it with the static data
+            self.data = b"".join(self.iterable)
+            self.iterable = None
+            self.size = len(self.data)
+
+    def __repr__(self):
+        return "<{}({})>".format(
+            type(self).__name__,
+            ", ".join("{}={!r}".format(k, getattr(self, k)) for k in self.__slots__)
+        )
 
 
 class ZipStream:
@@ -636,7 +666,7 @@ class ZipStream:
             return False
 
         try:
-            kwargs = self._queue.popleft()
+            entry = self._queue.popleft()
         except IndexError:
             return False
 
@@ -645,7 +675,7 @@ class ZipStream:
         # first will cause corrupted streams. Prevent this by adding a lock
         # around the functions that actually generate data.
         with self._gen_lock:
-            yield from self._gen_file_entry(**kwargs)
+            yield from self._gen_file_entry(entry)
         return True
 
     def all_files(self):
@@ -929,24 +959,24 @@ class ZipStream:
                 for x in self._filelist
             ]
             for x in self._queue:
-                is_dir = x["arcname"][-1] == "/"
-                compress_type = x.get("compress_type", self._compress_type)
+                is_dir = x.arcname[-1] == "/"
+                compress_type = x.compress_type if x.compress_type is not None else self._compress_type
                 if is_dir:
                     compress_size = 0
                 elif compress_type == ZIP_STORED:
-                    compress_size = x.get("size")
+                    compress_size = x.size
                 else:
                     compress_size = None
 
                 info.append({
-                    "name": x["arcname"],
-                    "size": x.get("size"),
+                    "name": x.arcname,
+                    "size": x.size,
                     "compressed_size": compress_size,
-                    "datetime": None,
+                    "datetime": x.date_time,
                     "is_dir": is_dir,
                     "CRC": None,
                     "compress_type": compress_type,
-                    "compress_level": x.get("compress_level", self._compress_level),
+                    "compress_level": x.compress_level if x.compress_level is not None else self._compress_level,
                     "streamed": False,
                 })
 
@@ -1002,88 +1032,51 @@ class ZipStream:
         z.add_path(path, **kwargs)
         return z
 
-    def _enqueue(self, **kwargs):
+    def _enqueue(self, *, compress_type, compress_level, **kwargs):
         """Internal method to enqueue files, data, and iterables to be streamed"""
-        if not kwargs["arcname"].rstrip("/"):
-            raise ValueError("A valid arcname is required")
 
-        path = kwargs.get("path")
-        data = kwargs.get("data")
-        size = kwargs.get("size")
+        # Remove redundant compression parameters
+        if compress_type == self._compress_type:
+            compress_type = None
+        if compress_level == self._compress_level:
+            compress_level = None
 
-        if path:
-            st = os.stat(path)
-        else:
-            st = None
+        entry = _ZipEntry(compress_type=compress_type, compress_level=compress_level, **kwargs)
 
-        # Get the modified time of the added path (use current time for
-        # non-paths) and use it to update the last_modified property
-        mtime = time.localtime(st.st_mtime if path else None)[0:6]
-        if self._last_modified is None or self._last_modified < mtime:
-            self._last_modified = mtime
-
-        # Get the expected size of the data where possible
-        if path or size is None:
-            if path:
-                if stat.S_ISDIR(st.st_mode):
-                    kwargs["size"] = 0
-                else:
-                    kwargs["size"] = st.st_size
-            elif data is not None:
-                kwargs["size"] = len(data)
-
-        # If adding data from a path ensure that the name matches the type of
-        # data being added.
-        if path:
-            name_is_dir = kwargs["arcname"][-1] == "/"
-            path_is_dir = stat.S_ISDIR(st.st_mode)
-            if path_is_dir and not name_is_dir:
-                kwargs["arcname"] += "/"
-            elif not path_is_dir and name_is_dir:
-                kwargs["arcname"] = kwargs["arcname"].rstrip("/")
+        # Update the last_modified property
+        if self._last_modified is None or self._last_modified < entry.date_time:
+            self._last_modified = entry.date_time
 
         # If the ZipStream is sized then it will look at what is being added
         # and add the number of bytes used by this file to the running total
         # length of the stream. It will also read any iterables fully into
         # memory so their size is known.
         if self._sized:
-            if kwargs.get("compress_type"):
+            if entry.compress_type:
                 raise ValueError("Cannot use compression with a sized ZipStream")
 
-            # Iterate the iterable data to get the size and replace it with the static data
-            if path is None and data is None and size is None:
-                data = b"".join(kwargs.pop("iterable"))
-                kwargs["size"] = len(data)
-                kwargs["data"] = data
+            entry.ensure_size()
+            self._add_size_from_file(entry.arcname, entry.size)
 
-            self._add_size_from_file(kwargs["arcname"], kwargs["size"])
-
-        # Remove any default/redundant compression parameters
-        if kwargs.get("compress_type") in (None, self._compress_type):
-            kwargs.pop("compress_type", None)
-        if kwargs.get("compress_level") in (None, self._compress_level):
-            kwargs.pop("compress_level", None)
-
-        # directories are always stored
-        if kwargs["arcname"][-1] == "/":
-            kwargs["compress_type"] = ZIP_STORED
-
-        self._queue.append(kwargs)
+        self._queue.append(entry)
 
     def _track(self, data):
         """Data passthrough with byte counting"""
         self._pos += len(data)
         return data
 
-    def _gen_file_entry(self, *, path=None, iterable=None, data=None, size=None, arcname, compress_type=None, compress_level=None):
+    def _gen_file_entry(self, entry):
         """Yield the zipped data generated by the specified path/iterator/data"""
-        assert bool(path) ^ bool(iterable) ^ bool(data is not None)
-        assert not (self._sized and size is None)
+        assert not (self._sized and entry.size is None)
 
-        if path:
-            zinfo = ZipStreamInfo.from_file(path, arcname)
+        zinfo = ZipStreamInfo(entry.arcname, date_time=entry.date_time)
+        if entry.path:
+            # Set attributes in the same way as ZipInfo.from_file
+            # TODO: cache the mode up front to avoid the extra stat?
+            zinfo.external_attr = (os.stat(entry.path).st_mode & 0xFFFF) << 16  # Unix attributes
+            if zinfo.is_dir():
+                zinfo.external_attr |= 0x10  # MS-DOS directory flag
         else:
-            zinfo = ZipStreamInfo(arcname)
             # Set the external attributes in the same way as ZipFile.writestr
             if zinfo.is_dir():
                 zinfo.external_attr = 0o40775 << 16  # drwxrwxr-x
@@ -1091,42 +1084,42 @@ class ZipStream:
             else:
                 zinfo.external_attr = 0o600 << 16  # ?rw-------
 
-            if data is not None:
-                zinfo.file_size = len(data)
-            elif size is not None:
-                zinfo.file_size = size
+        if entry.size is not None:
+            zinfo.file_size = entry.size
 
-        zinfo.compress_type = compress_type if compress_type is not None else self._compress_type
+        zinfo.compress_type = entry.compress_type if entry.compress_type is not None else self._compress_type
         if not PY36_COMPAT:
             if zinfo.compress_type in (ZIP_STORED, ZIP_LZMA):
                 # Make sure the zinfo properties are accurate for info_list
                 zinfo._compresslevel = None
             else:
-                zinfo._compresslevel = compress_level if compress_level is not None else self._compress_level
+                zinfo._compresslevel = entry.compress_level if entry.compress_level is not None else self._compress_level
 
         # Store the position of the header
         zinfo.header_offset = self._pos
 
         # We need to force using zip64 extensions for unsized iterables since
         # we don't know how big they'll end up being.
-        force_zip64 = bool(iterable) and size is None
+        force_zip64 = entry.iterable is not None and entry.size is None
 
         # Convert paths and data into iterables
-        if path:
+        if entry.path is not None:
             if zinfo.is_dir():
                 iterable = None
             else:
-                iterable = _iter_file(path)
-        elif data is not None:
+                iterable = _iter_file(entry.path)
+        elif entry.data is not None:
             def gen():
-                yield data
+                yield entry.data
             iterable = gen()
+        else:
+            iterable = entry.iterable
 
         # Generate the file data
         for x in zinfo._file_data(iterable, force_zip64=force_zip64):
             yield self._track(x)
 
-        if size is not None and size != zinfo.file_size:
+        if entry.size is not None and entry.size != zinfo.file_size:
             # The size of the data that was stored didn't match what was
             # expected. Note that this still produces a valid zip file, just
             # one with a different amount of data than was expected.
@@ -1134,14 +1127,14 @@ class ZipStream:
             # actual size will no longer match the calculated size.
             __log__.warning(
                 "Size mismatch when adding data for '%s' (expected %d bytes, got %d)",
-                arcname,
-                size,
+                entry.arcname,
+                entry.size,
                 zinfo.file_size
             )
             if self._sized:
                 raise RuntimeError(
                     "Error adding '{}' to sized ZipStream - "
-                    "actual size did not match the computed size".format(arcname)
+                    "actual size did not match the computed size".format(entry.arcname)
                 )
 
         self._filelist.append(zinfo)
