@@ -1254,7 +1254,7 @@ def test_info_list(monkeypatch):
         "compressed_size": 0,
         "datetime": faketime,
         "is_dir": True,
-        "CRC": None,
+        "CRC": 0,
         "compress_type": zipfile.ZIP_STORED,  # directories always stored
         "compress_level": None,
         "streamed": False,

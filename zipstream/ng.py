@@ -45,7 +45,7 @@ _FLAG_IS_DIRECTORY = 1 << 4
 _FLAG_UTF8_FILENAME = 1 << 11
 
 # The id of the creating system (assume everything other than Windows is unix-y)
-_DEFAULT_CREATE_SYSTEM = 0 if sys.platform == "win32" else 3
+CREATE_SYSTEM = 0 if sys.platform == "win32" else 3
 
 # Size of chunks to read out of files
 # Note that when compressing data the compressor will operate on bigger chunks
@@ -149,7 +149,7 @@ class _DataSrc(enum.Enum):
 
 
 class ZipStreamInfo:
-    """A ZipInfo-like class that always uses a data descriptor to store filesize data"""
+    """A ZipInfo-like class that always uses a data descriptor to store file data"""
 
     __slots__ = (
         "arcname",
@@ -157,8 +157,6 @@ class ZipStreamInfo:
         "compress_type",
         "compress_level",
         "comment",
-        "create_system",
-        "create_version",
         "extract_version",
         "flag_bits",
         "external_attr",
@@ -170,7 +168,7 @@ class ZipStreamInfo:
         "_data",
     )
 
-    def __init__(self, *, path=None, data=None, iterable=None, size=None, arcname, compress_type=None, compress_level=None):
+    def __init__(self, *, path=None, data=None, iterable=None, size=None, arcname, compress_type=ZIP_STORED, compress_level=None):
         if not (arcname or "").rstrip("/"):
             raise ValueError("A valid arcname is required")
         if not (bool(path) ^ bool(iterable) ^ bool(data is not None)):
@@ -196,12 +194,11 @@ class ZipStreamInfo:
         self.compress_type = compress_type    # Type of compression for the file
         self.compress_level = compress_level  # Level for the compressor
         self.comment = b""                    # Comment for each file
-        self.create_system = _DEFAULT_CREATE_SYSTEM  # System which created ZIP archive
-        self.create_version = DEFAULT_VERSION  # Version which created ZIP archive
-        self.extract_version = DEFAULT_VERSION  # Version needed to extract archive
+        self.extract_version = None     # Version needed to extract archive
         self.external_attr = 0          # External file attributes
         self.compress_size = None       # Size of the compressed file
         self.file_size = size           # Size of the uncompressed file
+        self.CRC = None                 # CRC of the uncompressed file
         self.header_offset = None       # The offset of the FileHeader in the stream
 
         if self._data_src is _DataSrc.PATH:
@@ -223,19 +220,16 @@ class ZipStreamInfo:
             date_time = min(max(MIN_DATE, date_time), MAX_DATE)
         self.date_time = date_time
 
-        # Get attributes from the filesystem where possible
         if st is not None:
+            # Get size and attributes from the filesystem
             self.external_attr = (st.st_mode & 0xFFFF) << 16  # Unix attributes
 
             # Ensure the arcname matches the type of data being added
             name_is_dir = self.is_dir()
             if stat.S_ISDIR(st.st_mode):
-                self.external_attr |= _FLAG_IS_DIRECTORY
-                self.file_size = 0
                 if not name_is_dir:
                     self.filename = arcname + "/"
             else:
-                self.external_attr &= ~_FLAG_IS_DIRECTORY
                 self.file_size = st.st_size
                 if name_is_dir:
                     self.filename = arcname.rstrip("/")
@@ -244,17 +238,44 @@ class ZipStreamInfo:
             if self._data_src is _DataSrc.LITERAL and self.file_size is None:
                 self.file_size = len(self._data)
 
-            # Set the external attributes in the same was a ZipFile.writestr
+            # Set the external attributes in the same way as ZipFile.writestr
             if self.is_dir():
                 self.external_attr = 0o40775 << 16  # drwxrwxr-x
-                self.external_attr |= _FLAG_IS_DIRECTORY
             else:
                 self.external_attr = 0o00600 << 16  # ?rw-------
 
-        # No compression for dirs
         if self.is_dir():
+            self.external_attr |= _FLAG_IS_DIRECTORY
+            # We know the file header data, no need to use the data descriptor
+            self.CRC = 0
+            self.compress_size = 0
+            self.file_size = 0
+            self.flag_bits &= ~_FLAG_DATA_DESCRIPTOR
+            # No compression for dirs
             self.compress_type = ZIP_STORED
+        else:
+            self.external_attr &= ~_FLAG_IS_DIRECTORY
+            # Set the data descriptor flag so the filesizes and CRC can be added
+            # after the file data
+            self.flag_bits |= _FLAG_DATA_DESCRIPTOR
+
+        # Special cases for some compression types
+        # NOTE: can only set the extract_version for LZMA/BZIP2 because it is > ZIP64_VERSION
+        if self.compress_type == ZIP_STORED:
+            self.compress_size = self.file_size
             self.compress_level = None
+        elif self.compress_type == ZIP_BZIP2:
+            self.extract_version = BZIP2_VERSION
+        elif self.compress_type == ZIP_LZMA:
+            self.compress_level = None
+            # Compressed LZMA data includes an end-of-stream (EOS) marker
+            self.flag_bits |= _FLAG_LZMA_EOS_MARKER
+            self.extract_version = LZMA_VERSION
+
+    @property
+    def create_version(self):
+        # always set to the same as the extract version
+        return self.extract_version
 
     @property
     def filename(self):
@@ -335,9 +356,10 @@ class ZipStreamInfo:
             file_size = 0xFFFFFFFF
             compress_size = 0xFFFFFFFF
 
-        min_version = _min_version_for_compress_type(self.compress_type, min_version)
-        self.extract_version = max(min_version, self.extract_version)
-        self.create_version = max(min_version, self.create_version)
+        self.extract_version = max(
+            _min_version_for_compress_type(self.compress_type, min_version),
+            self.extract_version or DEFAULT_VERSION,
+        )
         header = struct.pack(
             structFileHeader,
             stringFileHeader,
@@ -377,26 +399,14 @@ class ZipStreamInfo:
         always be used for storing files (not directories).
         """
         # Based on the code in zipfile.ZipFile.write, zipfile._ZipWriteFile.{write,close}
-        if self.compress_type == ZIP_LZMA:
-            # Compressed LZMA data includes an end-of-stream (EOS) marker
-            self.flag_bits |= _FLAG_LZMA_EOS_MARKER
-
         # Adding a folder - just need the header without any data or a data descriptor
         if self.is_dir():
-            self.CRC = 0
-            self.compress_size = 0
-            self.file_size = 0
-            self.flag_bits &= ~_FLAG_DATA_DESCRIPTOR
             yield self.FileHeader(zip64=False)
             return
 
         iterable = self._data_iterator()
         if not iterable:  # pragma: no cover
             raise ValueError("Not a directory but no data given to encode")
-
-        # Set the data descriptor flag so the filesizes and CRC can be added
-        # after the file data
-        self.flag_bits |= _FLAG_DATA_DESCRIPTOR
 
         # Compressed size can be larger than uncompressed size - overestimate a bit
         zip64 = force_zip64 or self.file_size * ZIP64_ESTIMATE_FACTOR > ZIP64_LIMIT
@@ -470,7 +480,6 @@ class ZipStreamInfo:
             header_offset = self.header_offset
 
         extra_data = b""  # TODO: support adding arbitrary extras?
-        min_version = 0
         if extra:
             # Append a Zip64 field to the extra's
             # Note that zipfile.ZipFile._write_end_record strips any existing
@@ -484,17 +493,14 @@ class ZipStreamInfo:
                 8*num_extras,
                 *extra,
             ) + extra_data
-            min_version = ZIP64_VERSION
+            self.extract_version = max(ZIP64_VERSION, self.extract_version)
 
-        min_version = _min_version_for_compress_type(self.compress_type, min_version)
-        extract_version = max(min_version, self.extract_version)
-        create_version = max(min_version, self.create_version)
         centdir = struct.pack(
             structCentralDir,
             stringCentralDir,
-            create_version,
-            self.create_system,
-            extract_version,
+            self.create_version,
+            CREATE_SYSTEM,
+            self.extract_version,
             0,  # reserved - must be 0
             self.flag_bits,
             self.compress_type,
@@ -514,7 +520,7 @@ class ZipStreamInfo:
         return centdir + self.arcname + extra_data + self.comment
 
     def is_dir(self):
-        """Return True if this archive member is a directory."""
+        """Return True if this archive member is a directory"""
         return self.arcname[-1] == 47  # "/" in both utf-8 and ascii
 
 
@@ -671,7 +677,7 @@ class ZipStream:
             object with the `len()` function will not work (will raise a
             TypeError)
         """
-        if compress_type and sized:
+        if compress_type != ZIP_STORED and sized:
             raise ValueError("Cannot use compression with a sized ZipStream")
 
         _check_compression(compress_type, compress_level)
@@ -1036,24 +1042,15 @@ class ZipStream:
                 for x in self._filelist
             ]
             for x in self._queue:
-                is_dir = x.is_dir()
-                compress_type = x.compress_type if x.compress_type is not None else self._compress_type
-                if is_dir:
-                    compress_size = 0
-                elif compress_type == ZIP_STORED:
-                    compress_size = x.file_size
-                else:
-                    compress_size = None
-
                 info.append({
                     "name": x.filename,
                     "size": x.file_size,
-                    "compressed_size": compress_size,
+                    "compressed_size": x.compress_size,
                     "datetime": x.date_time,
-                    "is_dir": is_dir,
-                    "CRC": None,
-                    "compress_type": compress_type,
-                    "compress_level": x.compress_level if x.compress_level is not None else self._compress_level,
+                    "is_dir": x.is_dir(),
+                    "CRC": x.CRC,
+                    "compress_type": x.compress_type,
+                    "compress_level": x.compress_level,
                     "streamed": False,
                 })
 
@@ -1111,12 +1108,11 @@ class ZipStream:
 
     def _enqueue(self, *, compress_type, compress_level, **kwargs):
         """Internal method to enqueue files, data, and iterables to be streamed"""
-
-        # Remove redundant compression parameters
-        if compress_type == self._compress_type:
-            compress_type = None
-        if compress_level == self._compress_level:
-            compress_level = None
+        # default compression to match the archive
+        if compress_type is None:
+            compress_type = self._compress_type
+        if compress_level is None:
+            compress_level = self._compress_level
 
         zinfo = ZipStreamInfo(compress_type=compress_type, compress_level=compress_level, **kwargs)
 
@@ -1129,7 +1125,7 @@ class ZipStream:
         # length of the stream. It will also read any iterables fully into
         # memory so their size is known.
         if self._sized:
-            if zinfo.compress_type:
+            if zinfo.compress_type != ZIP_STORED:
                 raise ValueError("Cannot use compression with a sized ZipStream")
 
             zinfo.ensure_sized()
@@ -1146,23 +1142,14 @@ class ZipStream:
         """Yield the zipped data generated by the specified path/iterator/data"""
         assert not (self._sized and zinfo.file_size is None)
 
-        if zinfo.compress_type is None:
-            zinfo.compress_type = self._compress_type
-        if not PY36_COMPAT:
-            if zinfo.compress_type in (ZIP_STORED, ZIP_LZMA):
-                # Make sure the zinfo properties are accurate for info_list
-                zinfo.compress_level = None
-            elif zinfo.compress_level is None:
-                zinfo.compress_level = self._compress_level
-
-        # Store the position of the header
-        zinfo.header_offset = self._pos
-
         # We need to force using zip64 extensions for unsized iterables since
         # we don't know how big they'll end up being.
         force_zip64 = zinfo._data_src is _DataSrc.ITERABLE and zinfo.file_size is None
 
         predicted_size = zinfo.file_size
+
+        # Store the position of the header we're about to yield
+        zinfo.header_offset = self._pos
 
         # Generate the file data
         for x in zinfo._file_data(force_zip64=force_zip64):
