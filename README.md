@@ -1,6 +1,6 @@
 zipstream-ng
 ============
-[![Status](https://github.com/pR0Ps/zipstream-ng/workflows/tests/badge.svg)](https://github.com/pR0Ps/zipstream-ng/actions/workflows/tests.yml)
+[![Status](https://github.com/pR0Ps/zipstream-ng/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/pR0Ps/zipstream-ng/actions/workflows/tests.yml?query=branch%3Amaster)
 [![Version](https://img.shields.io/pypi/v/zipstream-ng.svg)](https://pypi.org/project/zipstream-ng/)
 ![Python](https://img.shields.io/pypi/pyversions/zipstream-ng.svg)
 
