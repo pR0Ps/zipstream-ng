@@ -38,6 +38,11 @@ PY313_COMPAT = sys.version_info < (3, 14)  # disable zstd
 PY36_COMPAT = sys.version_info < (3, 7)  # disable compress_level
 PY35_COMPAT = sys.version_info < (3, 6)  # backport ZipInfo functions, stringify path-like objects
 
+# Bit flags for file entries
+_FLAG_LZMA_EOS_MARKER = 1 << 1
+_FLAG_DATA_DESCRIPTOR = 1 << 3
+_FLAG_IS_DIRECTORY = 1 << 4
+
 # Size of chunks to read out of files
 # Note that when compressing data the compressor will operate on bigger chunks
 # than this - it keeps a cache as new chunks are fed to it.
@@ -182,7 +187,7 @@ class ZipStreamInfo(ZipInfo):
         #   sizes as 0 to defer to the data descriptor.
 
         dosdate, dostime = _timestamp_to_dos(self.date_time)
-        if self.flag_bits & 0x08:
+        if self.flag_bits & _FLAG_DATA_DESCRIPTOR:
             # Using a data descriptor record to record the file sizes, set
             # everything to 0 since they'll be written there instead.
             CRC = compress_size = file_size = 0
@@ -238,14 +243,14 @@ class ZipStreamInfo(ZipInfo):
 
         if self.compress_type == ZIP_LZMA:
             # Compressed LZMA data includes an end-of-stream (EOS) marker
-            self.flag_bits |= 0x02
+            self.flag_bits |= _FLAG_LZMA_EOS_MARKER
 
         # Adding a folder - just need the header without any data or a data descriptor
         if self.is_dir():
             self.CRC = 0
             self.compress_size = 0
             self.file_size = 0
-            self.flag_bits &= ~0x08  # Unset the data descriptor flag
+            self.flag_bits &= ~_FLAG_DATA_DESCRIPTOR
             yield self.FileHeader(zip64=False)
             return
 
@@ -254,7 +259,7 @@ class ZipStreamInfo(ZipInfo):
 
         # Set the data descriptor flag so the filesizes and CRC can be added
         # after the file data
-        self.flag_bits |= 0x08
+        self.flag_bits |= _FLAG_DATA_DESCRIPTOR
 
         # Compressed size can be larger than uncompressed size - overestimate a bit
         zip64 = force_zip64 or self.file_size * ZIP64_ESTIMATE_FACTOR > ZIP64_LIMIT
@@ -395,7 +400,7 @@ class ZipStreamInfo(ZipInfo):
             zinfo.external_attr = (st.st_mode & 0xFFFF) << 16  # Unix attributes
             if isdir:
                 zinfo.file_size = 0
-                zinfo.external_attr |= 0x10  # MS-DOS directory flag
+                zinfo.external_attr |= _FLAG_IS_DIRECTORY
             else:
                 zinfo.file_size = st.st_size
 
@@ -1082,7 +1087,7 @@ class ZipStream:
             # Set the external attributes in the same way as ZipFile.writestr
             if zinfo.is_dir():
                 zinfo.external_attr = 0o40775 << 16  # drwxrwxr-x
-                zinfo.external_attr |= 0x10  # MS-DOS directory flag
+                zinfo.external_attr |= _FLAG_IS_DIRECTORY
             else:
                 zinfo.external_attr = 0o600 << 16  # ?rw-------
 
