@@ -1163,8 +1163,8 @@ class ZipStream:
                 stringEndArchive64,
                 44,  # size of this record after this point
                      # (note: no "zip extensible data" is added so this is a constant)
-                45,  # version made by (Zip64 support)
-                45,  # version needed to extract (Zip64 support)
+                ZIP64_VERSION,  # version made by
+                ZIP64_VERSION,  # version needed to extract
                 0,  # disk number this record is on
                 0,  # disk number that contains the start of the central directory
                 centDirCount,
