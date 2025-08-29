@@ -1059,6 +1059,10 @@ class ZipStream:
         if kwargs.get("compress_level") in (None, self._compress_level):
             kwargs.pop("compress_level", None)
 
+        # directories are always stored
+        if kwargs["arcname"][-1] == "/":
+            kwargs["compress_type"] = ZIP_STORED
+
         self._queue.append(kwargs)
 
     def _track(self, data):
