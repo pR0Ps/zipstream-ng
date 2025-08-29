@@ -188,6 +188,10 @@ class ZipStreamInfo:
         assert self._data is not None
 
         # TODO: clean up arcname/filename confusion
+        # TODO: make comment a property to enforce the ZIP_MAX_COMMENT.
+        #       Also do something about the encoding - according to the spec, if
+        #       the _FLAG_UTF8_FILENAME is set the comment must be encoded in
+        #       utf-8 in the same way as the filename.
 
         self.flag_bits = 0                      # ZIP flag bits
         self.filename = arcname                 # Normalized file name (sets arcname and utf8 flag bit if needed)
@@ -1189,9 +1193,6 @@ class ZipStream:
         # Write central directory file headers
         centDirOffset = self._pos
         for zinfo in self._filelist:
-            if self._sized and zinfo.comment:
-                __log__.warning("File comments not currently supported in sized ZipStreams - removing it")
-                zinfo.comment = b""
             yield self._track(zinfo._central_directory_header_data())
 
         # Write end of central directory record
@@ -1293,6 +1294,7 @@ class ZipStream:
 
             cdfh_size += sizeCentralDir  # 46
             cdfh_size += arcname_len
+            cdfh_size += len(zinfo.comment)
 
             # Add space for extra data
             if cdfh_extras:

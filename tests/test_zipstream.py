@@ -17,7 +17,7 @@ import zlib
 import pytest
 
 import zipstream
-from zipstream import ZipStream
+from zipstream import ZipStream, ZipStreamInfo
 
 
 PY313 = sys.version_info < (3, 14)
@@ -106,6 +106,7 @@ def _assert_equal_zips(z1, z2):
         assert x1.date_time == x2.date_time
         assert x1.CRC == x2.CRC
         assert x1.compress_type == x2.compress_type
+        assert x1.comment == x2.comment
 
 def _gen_rand():
     for x in range(10):
@@ -1047,6 +1048,9 @@ def test_adding_comment(caplog):
     assert not zs.comment
 
     with pytest.raises(TypeError):
+        zs.comment = 10
+
+    with pytest.raises(TypeError):
         zs.comment += "test"
     zs.comment += "test".encode("utf-8")
 
@@ -1061,11 +1065,43 @@ def test_adding_comment(caplog):
     assert "too long" not in caplog.text
     zs.comment = c
     assert "too long" in caplog.text
+    truncated = c[:zipfile.ZIP_MAX_COMMENT]
     assert len(zs.comment) != l
     assert len(zs.comment) == zipfile.ZIP_MAX_COMMENT
+    assert zs.comment == truncated
 
-    with pytest.raises(TypeError):
-        zs.comment = 10
+    assert _get_zip(zs).comment == truncated
+
+
+def test_adding_file_comment():
+    """Test that if the added file/directory has a comment it's added and
+    included in the calculated size"""
+    # adding file comments is currently not supported - have to patch it in
+    from unittest.mock import patch
+
+    COMMENT = "this is a comment".encode("utf8")
+
+    __init__ = ZipStreamInfo.__init__
+    def patched_init(self, *args, **kwargs):
+        __init__(self, *args, **kwargs)
+        self.comment = COMMENT
+
+    with patch.object(ZipStreamInfo, "__init__", patched_init):
+        zs = ZipStream(sized=True)
+        zs.add(b"data", "data.txt")
+        zs.mkdir("directory")
+
+        l = len(zs)
+        data = bytes(zs)
+        assert len(data) == l
+        zinfos = _get_zip(data).infolist()
+        for x in zinfos:
+            assert x.comment == COMMENT
+        assert zinfos[0].filename == "data.txt"
+        assert zinfos[1].filename == "directory/"
+        print([{k: getattr(x, k) for k in x.__slots__} for x in zinfos])
+
+    assert False
 
 
 def test_finalizing():
