@@ -189,17 +189,17 @@ class ZipStreamInfo:
 
         # TODO: clean up arcname/filename confusion
 
-        self.flag_bits = 0                    # ZIP flag bits
-        self.filename = arcname               # Normalized file name (sets arcname and utf8 flag bit if needed)
-        self.compress_type = compress_type    # Type of compression for the file
-        self.compress_level = compress_level  # Level for the compressor
-        self.comment = b""                    # Comment for each file
-        self.extract_version = None     # Version needed to extract archive
-        self.external_attr = 0          # External file attributes
-        self.compress_size = None       # Size of the compressed file
-        self.file_size = size           # Size of the uncompressed file
-        self.CRC = None                 # CRC of the uncompressed file
-        self.header_offset = None       # The offset of the FileHeader in the stream
+        self.flag_bits = 0                      # ZIP flag bits
+        self.filename = arcname                 # Normalized file name (sets arcname and utf8 flag bit if needed)
+        self.compress_type = compress_type      # Type of compression for the file
+        self.compress_level = compress_level    # Level for the compressor
+        self.comment = b""                      # Comment for each file
+        self.extract_version = DEFAULT_VERSION  # Version needed to extract file
+        self.external_attr = 0                  # External file attributes
+        self.compress_size = None               # Size of the compressed file
+        self.file_size = size                   # Size of the uncompressed file
+        self.CRC = None                         # CRC of the uncompressed file
+        self.header_offset = None               # The offset of the FileHeader in the stream
 
         if self._data_src is _DataSrc.PATH:
             st = os.stat(self._data)
@@ -209,7 +209,7 @@ class ZipStreamInfo:
         # Get the modified time of the added path (use current time for
         # non-paths) and automatically clamp it to the range that the zip
         # format supports.
-        # TODO: support custom times in the future
+        # TODO: support custom times
         date_time = time.localtime(st.st_mtime if st is not None else None)[0:6]
         if not (MIN_DATE <= date_time <= MAX_DATE):
             __log__.warning(
@@ -259,18 +259,15 @@ class ZipStreamInfo:
             # after the file data
             self.flag_bits |= _FLAG_DATA_DESCRIPTOR
 
-        # Special cases for some compression types
-        # NOTE: can only set the extract_version for LZMA/BZIP2 because it is > ZIP64_VERSION
+        # Process special cases for compression types
+        self.extract_version = _min_version_for_compress_type(self.compress_type, DEFAULT_VERSION)
         if self.compress_type == ZIP_STORED:
             self.compress_size = self.file_size
             self.compress_level = None
-        elif self.compress_type == ZIP_BZIP2:
-            self.extract_version = BZIP2_VERSION
         elif self.compress_type == ZIP_LZMA:
             self.compress_level = None
             # Compressed LZMA data includes an end-of-stream (EOS) marker
             self.flag_bits |= _FLAG_LZMA_EOS_MARKER
-            self.extract_version = LZMA_VERSION
 
     @property
     def create_version(self):
@@ -341,10 +338,9 @@ class ZipStreamInfo:
             compress_size = self.compress_size
             file_size = self.file_size
 
-        min_version = 0
         extra = b""  # TODO: support arbitrary extras?
         if zip64:
-            min_version = ZIP64_VERSION
+            self.extract_version = max(self.extract_version, ZIP64_VERSION)
             extra += struct.pack(
                 "<HHQQ",
                 0x01,  # Zip64 extended information extra field identifier
@@ -356,10 +352,6 @@ class ZipStreamInfo:
             file_size = 0xFFFFFFFF
             compress_size = 0xFFFFFFFF
 
-        self.extract_version = max(
-            _min_version_for_compress_type(self.compress_type, min_version),
-            self.extract_version or DEFAULT_VERSION,
-        )
         header = struct.pack(
             structFileHeader,
             stringFileHeader,
