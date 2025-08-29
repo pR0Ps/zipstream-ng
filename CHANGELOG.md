@@ -1,6 +1,9 @@
 zipstream-ng changelog
 ======================
 
+### [v1.9.0]
+- Add support for Zstandard compression where available (Python 3.14+)
+
 ### [v1.8.0]
 - Support adding directory contents at the top level of the `ZipStream` by specifying an arcname of `/`
 - Fix issue where leading path separators could cause an incorrect size to be calculated.
@@ -101,3 +104,4 @@ zipstream-ng changelog
  [v1.7.0]: https://github.com/pR0Ps/zipstream-ng/compare/v1.6.0...v1.7.0
  [v1.7.1]: https://github.com/pR0Ps/zipstream-ng/compare/v1.7.0...v1.7.1
  [v1.8.0]: https://github.com/pR0Ps/zipstream-ng/compare/v1.7.1...v1.8.0
+ [v1.9.0]: https://github.com/pR0Ps/zipstream-ng/compare/v1.8.0...v1.9.0
