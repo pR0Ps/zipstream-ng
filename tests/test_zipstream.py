@@ -20,6 +20,7 @@ import zipstream
 from zipstream import ZipStream
 
 
+PY313 = sys.version_info < (3, 14)
 PY36 = sys.version_info < (3, 7)
 PY35 = sys.version_info < (3, 6)
 
@@ -30,6 +31,14 @@ FILES = [
     ("mbyte", 1024 * 1024),
 ]
 
+COMPRESS_TYPES = [
+    zipfile.ZIP_STORED,
+    zipfile.ZIP_LZMA,
+    zipfile.ZIP_DEFLATED,
+    zipfile.ZIP_BZIP2,
+]
+if not PY313:
+    COMPRESS_TYPES.append(zipfile.ZIP_ZSTANDARD)
 
 # Patch is_dir onto ZipInfo objects in 3.5 to make testing easier
 @pytest.fixture(autouse=PY35)
@@ -107,12 +116,7 @@ def _gen_rand():
 # Tests start
 ################################
 
-@pytest.mark.parametrize("ct", [
-    zipfile.ZIP_STORED,
-    zipfile.ZIP_LZMA,
-    zipfile.ZIP_DEFLATED,
-    zipfile.ZIP_BZIP2
-])
+@pytest.mark.parametrize("ct", COMPRESS_TYPES)
 def test_zipstream_compression(caplog, files, ct):
     """Test that all types of compression properly compress and extract"""
     caplog.set_level(logging.WARNING)
@@ -135,12 +139,7 @@ def test_zipstream_compression(caplog, files, ct):
         _verify_zip_contains(zf, f)
 
 
-@pytest.mark.parametrize("ct", [
-    zipfile.ZIP_STORED,
-    zipfile.ZIP_LZMA,
-    zipfile.ZIP_DEFLATED,
-    zipfile.ZIP_BZIP2
-])
+@pytest.mark.parametrize("ct", COMPRESS_TYPES)
 @pytest.mark.parametrize("cl", [None, 2])
 def test_mixed_compression_and_getinfo(ct, cl):
     """Test that files are compressed using the correct method and level and
@@ -159,11 +158,14 @@ def test_mixed_compression_and_getinfo(ct, cl):
     zs.add(b"3c", arcname="3c", compress_type=zipfile.ZIP_DEFLATED, compress_level=TEST_CL)
     zs.add(b"4", arcname="4", compress_type=zipfile.ZIP_BZIP2)
     zs.add(b"4c", arcname="4c", compress_type=zipfile.ZIP_BZIP2, compress_level=TEST_CL)
+    if not PY313:
+        zs.add(b"5", arcname="5", compress_type=zipfile.ZIP_ZSTANDARD)
+        zs.add(b"5c", arcname="5c", compress_type=zipfile.ZIP_ZSTANDARD, compress_level=TEST_CL)
 
     zf = _get_zip(zs)
     zinfos = zf.infolist()
     fullinfos = zs.info_list()
-    assert len(zinfos) == len(fullinfos) == 9
+    assert len(zinfos) == len(fullinfos) == 9 + (0 if PY313 else 2)
 
     def assert_zinfo(idx, name, compress_type, compress_level):
         zi = zinfos[idx]
@@ -189,6 +191,9 @@ def test_mixed_compression_and_getinfo(ct, cl):
     assert_zinfo(6, "3c", zipfile.ZIP_DEFLATED, TEST_CL)
     assert_zinfo(7, "4", zipfile.ZIP_BZIP2, cl)
     assert_zinfo(8, "4c", zipfile.ZIP_BZIP2, TEST_CL)
+    if not PY313:
+        assert_zinfo(9, "5", zipfile.ZIP_ZSTANDARD, cl)
+        assert_zinfo(10, "5c", zipfile.ZIP_ZSTANDARD, TEST_CL)
 
 
 @pytest.mark.parametrize("zip64", [False, True])
@@ -366,6 +371,34 @@ def test_invalid_compression(ct):
         zs = ZipStream(compress_level=x)
         with pytest.raises(ValueError):
             zs.add(".", arcname=".", compress_type=ct)
+
+
+@pytest.mark.skipif(PY313, reason="Tests zstd compress_level (Python 3.14+ only)")
+def test_invalid_zstd_compression():
+    """Test zstd values outside of valid ones cause an error"""
+    ZipStream(compress_type=zipfile.ZIP_ZSTANDARD)
+
+    from compression.zstd import CompressionParameter
+    lower, upper = CompressionParameter.compression_level.bounds()
+
+    for x in (lower, lower+1, 0, upper-1, upper):
+        ZipStream(compress_type=zipfile.ZIP_ZSTANDARD, compress_level=x)
+
+    for x in (lower-1, upper+1):
+        with pytest.raises(ValueError):
+            ZipStream(compress_type=zipfile.ZIP_ZSTANDARD, compress_level=x)
+        with pytest.raises(ValueError):
+            ZipStream().add_path(".", compress_type=zipfile.ZIP_ZSTANDARD, compress_level=x)
+        with pytest.raises(ValueError):
+            ZipStream().add(".", arcname=".", compress_type=zipfile.ZIP_ZSTANDARD, compress_level=x)
+
+        zs = ZipStream(compress_type=zipfile.ZIP_ZSTANDARD)
+        with pytest.raises(ValueError):
+            zs.add(".", arcname=".", compress_level=x)
+
+        zs = ZipStream(compress_level=x)
+        with pytest.raises(ValueError):
+            zs.add(".", arcname=".", compress_type=zipfile.ZIP_ZSTANDARD)
 
 
 def test_multibyte_and_non_ascii_characters_in_filenames():
@@ -734,12 +767,7 @@ def test_custom_walk(tmpdir):
     [b"a", b"list", b"of", b"bytes"],
     _gen_rand()
 ])
-@pytest.mark.parametrize("ct", [
-    zipfile.ZIP_STORED,
-    zipfile.ZIP_LZMA,
-    zipfile.ZIP_DEFLATED,
-    zipfile.ZIP_BZIP2
-])
+@pytest.mark.parametrize("ct", COMPRESS_TYPES)
 def test_adding_data(caplog, data, ct):
     """Test adding non-files with different compression methods"""
     caplog.set_level(logging.WARNING)
@@ -1173,6 +1201,36 @@ def test_invalid_dates(monkeypatch, date):
         assert zinfos[0].date_time == (2107, 12, 31, 23, 59, 58)
 
 
+@pytest.mark.skipif(PY313, reason="Tests zstd compress_level (Python 3.14+ only)")
+def test_zstd_uses_compression_level():
+    """Test that the zstd compression level is applied"""
+    zs = ZipStream(compress_type=zipfile.ZIP_ZSTANDARD)
+    test = b"a"*1024
+    zs.add(test, "-7.txt", compress_level=-7)
+    zs.add(test, "default.txt")
+    zs.add(test, "22.txt", compress_level=22)
+
+    data = bytes(zs)
+    info = list(zs.info_list())
+    assert len(info) == zs.num_streamed() == 3
+
+    for x in info:
+        assert x["size"] == 1024
+        assert x["compress_type"] == zipfile.ZIP_ZSTANDARD
+        assert x["CRC"] == 2085984185
+
+    assert info[0]["name"] == "-7.txt"
+    assert info[1]["name"] == "default.txt"
+    assert info[2]["name"] == "22.txt"
+
+    # check compress level set
+    assert info[0]["compress_level"] == -7
+    assert info[1]["compress_level"] == None
+    assert info[2]["compress_level"] == 22
+
+    # check different compressed sizes for each level (in decreasing order as level increases)
+    assert info[0]["compressed_size"] > info[1]["compressed_size"] > info[2]["compressed_size"]
+
 def test_info_list(monkeypatch):
     faketime = (1980, 1, 1, 0, 0, 0)
 
@@ -1228,8 +1286,8 @@ def test_info_list(monkeypatch):
     assert len([x for x in info2 if not x["streamed"]]) == zs.num_queued() == 0
     assert len([x for x in info2 if x["streamed"]]) == zs.num_streamed() == 3
 
-    # Make sure any information that ws provided up-front hasn't changed
-    # (except for the "streamed" key which mush got False -> True)
+    # Make sure any information that was provided up-front hasn't changed
+    # (except for the "streamed" key which must go False -> True)
     for pre, post in zip(info, info2):
         for k, v in pre.items():
             if k == "streamed":
@@ -1525,6 +1583,9 @@ def test_sized_zipstream(monkeypatch, files, zip64):
         ZipStream(sized=True, compress_type=zipfile.ZIP_LZMA)
     with pytest.raises(ValueError):
         ZipStream(sized=True, compress_type=zipfile.ZIP_BZIP2)
+    if not PY313:
+        with pytest.raises(ValueError):
+            ZipStream(sized=True, compress_type=zipfile.ZIP_ZSTANDARD)
 
     with pytest.raises(ValueError):
         ZipStream.from_path(".", sized=True, compress_type=zipfile.ZIP_DEFLATED)
@@ -1546,6 +1607,9 @@ def test_sized_zipstream(monkeypatch, files, zip64):
         szs.add("invalid", "invalid", compress_type=zipfile.ZIP_LZMA)
     with pytest.raises(ValueError):
         szs.add("invalid", "invalid", compress_type=zipfile.ZIP_BZIP2)
+    if not PY313:
+        with pytest.raises(ValueError):
+            szs.add("invalid", "invalid", compress_type=zipfile.ZIP_ZSTANDARD)
 
     assert szs.sized
     calculated = len(szs)
