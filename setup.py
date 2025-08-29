@@ -38,7 +38,6 @@ setup(
         "Programming Language :: Python :: 3.14",
         "Operating System :: OS Independent",
         "Topic :: System :: Archiving :: Compression",
-        "License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)"
     ],
     packages=["zipstream"],
     entry_points={
