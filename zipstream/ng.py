@@ -1278,6 +1278,8 @@ if not PY36_COMPAT:
 
     __all__ += ["AsyncZipStream"]
 
+    import queue
+    from typing import AsyncIterable, Iterable
     import asyncio
     try:
         from asyncio import to_thread
@@ -1326,6 +1328,38 @@ if not PY36_COMPAT:
             return cls
         return cls_builder
 
+    def _queue_from_async_iterable(
+        async_iterable: AsyncIterable[bytes],
+        maxsize: int = 0,
+    ) -> queue.Queue[bytes]:
+        """
+        Return a thread‑safe ``queue.Queue`` that will be filled with the
+        ``bytes`` yielded by *async_iterable*.
+
+        The filling is performed by a background ``asyncio.Task`` that runs
+        in the current event‑loop.  The caller (the ZipStream thread) can
+        read from the queue synchronously – ``queue.get()`` blocks until a
+        chunk is available or the iterable is exhausted.
+        """
+
+
+        q: queue.Queue[bytes] = queue.Queue(maxsize=maxsize)
+
+        async def _producer():
+            try:
+                async for chunk in async_iterable:
+                    # ``None`` is used as the sentinel that marks EOF.
+                    q.put(chunk)
+            finally:
+                q.put(None)  # signal that the async iterable is finished
+
+        # Schedule the producer in the *current* event loop.
+        # ``asyncio.create_task`` returns immediately; the task runs
+        # concurrently with everything else.
+        asyncio.create_task(_producer())
+        return q
+
+
 
     @_delegate("__len__", "__bool__", "__bytes__", "is_empty", "num_queued", "num_streamed", "mkdir", "info_list")
     @_delegate_property("sized", "last_modified", "comment")
@@ -1368,5 +1402,40 @@ if not PY36_COMPAT:
             return await to_thread(self._zip.add_path, *args, **kwargs)
 
         @functools.wraps(ZipStream.add)
-        async def add(self, data, *args, **kwargs):
-            return await to_thread(self._zip.add, data, *args, **kwargs)
+        async def add(
+            self,
+            data: AsyncIterable[bytes],
+            *args,
+            **kwargs,
+        ) -> None:
+            """
+            Add *data* to the zip archive where *data* is an asynchronous
+            iterable of ``bytes`` (e.g. an async generator that yields HTTP
+            chunks).
+
+            The method works by:
+
+            1. Creating a thread‑safe ``queue.Queue`` that is filled by a
+            background ``asyncio`` task running in the current event loop.
+            2. Passing a synchronous generator that reads from that queue
+            to the underlying ``ZipStream.add`` method (which runs in a
+            thread via ``to_thread``).
+
+            This keeps the event‑loop non‑blocking while the zip compression
+            happens in a separate thread.
+            """
+            # Turn the async iterable into a queue that the thread can read.
+            q = _queue_from_async_iterable(data)
+
+            # Build a *synchronous* generator that yields from the queue.
+            def sync_gen() -> Iterable[bytes]:
+                while True:
+                    chunk = q.get()  # blocks until a chunk is available
+                    if chunk is None:  # sentinel → end of stream
+                        break
+                    yield chunk
+
+            # Delegate to the original (thread‑based) ``add`` implementation.
+            # ``to_thread`` runs the whole call in a worker thread, so the
+            # zip compression stays off the event loop.
+            await asyncio.to_thread(self._zip.add, sync_gen(), *args, **kwargs)
