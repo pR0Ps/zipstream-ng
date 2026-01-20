@@ -1438,4 +1438,4 @@ if not PY36_COMPAT:
             # Delegate to the original (thread‑based) ``add`` implementation.
             # ``to_thread`` runs the whole call in a worker thread, so the
             # zip compression stays off the event loop.
-            await asyncio.to_thread(self._zip.add, sync_gen(), *args, **kwargs)
+            await to_thread(self._zip.add, sync_gen(), *args, **kwargs)
