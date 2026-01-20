@@ -1,6 +1,6 @@
 zipstream-ng
 ============
-[![Status](https://github.com/pR0Ps/zipstream-ng/workflows/tests/badge.svg)](https://github.com/pR0Ps/zipstream-ng/actions/workflows/tests.yml)
+[![Status](https://github.com/pR0Ps/zipstream-ng/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/pR0Ps/zipstream-ng/actions/workflows/tests.yml?query=branch%3Amaster)
 [![Version](https://img.shields.io/pypi/v/zipstream-ng.svg)](https://pypi.org/project/zipstream-ng/)
 ![Python](https://img.shields.io/pypi/pyversions/zipstream-ng.svg)
 
@@ -14,6 +14,7 @@ calculate the final size of the zip file before streaming it.
  - Can calculate the total size of the resulting zip file before generation even begins.
  - Low memory usage: Since the zip is generated as it's requested, very little has to be kept in
    memory (peak usage of less than 20MB is typical, even for TBs of files).
+ - Performant: On-par or faster than using the standard library to create non-streamed zip files.
  - Flexible API: Typical use cases are simple, complicated ones are possible.
  - Supports zipping data from files, bytes, strings, and any other iterable objects.
  - Keeps track of the date of the most recently modified file added to the zip file.
@@ -161,7 +162,7 @@ stream. In this example, all that information will be added to the zip in a file
 from zipstream import ZipStream
 import json
 
-def gen_zipfile()
+def gen_zipfile():
     zs = ZipStream.from_path("/path/to/files")
     yield from zs.all_files()
     zs.add(

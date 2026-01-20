@@ -14,7 +14,7 @@ except Exception:
 
 setup(
     name="zipstream-ng",
-    version="1.7.1",
+    version="1.9.0",
     description="A modern and easy to use streamable zip file generator",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -23,7 +23,7 @@ setup(
         "Source": "https://github.com/pR0Ps/zipstream-ng",
         "Changelog": "https://github.com/pR0Ps/zipstream-ng/blob/master/CHANGELOG.md",
     },
-    license="LGPLv3",
+    license="LGPL-3.0-only",
     classifiers=[
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.5",
@@ -34,9 +34,10 @@ setup(
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
+        "Programming Language :: Python :: 3.14",
         "Operating System :: OS Independent",
         "Topic :: System :: Archiving :: Compression",
-        "License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)"
     ],
     packages=["zipstream"],
     entry_points={

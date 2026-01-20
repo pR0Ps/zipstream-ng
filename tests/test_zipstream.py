@@ -20,6 +20,7 @@ import zipstream
 from zipstream import ZipStream
 
 
+PY313 = sys.version_info < (3, 14)
 PY36 = sys.version_info < (3, 7)
 PY35 = sys.version_info < (3, 6)
 
@@ -30,6 +31,14 @@ FILES = [
     ("mbyte", 1024 * 1024),
 ]
 
+COMPRESS_TYPES = [
+    zipfile.ZIP_STORED,
+    zipfile.ZIP_LZMA,
+    zipfile.ZIP_DEFLATED,
+    zipfile.ZIP_BZIP2,
+]
+if not PY313:
+    COMPRESS_TYPES.append(zipfile.ZIP_ZSTANDARD)
 
 # Patch is_dir onto ZipInfo objects in 3.5 to make testing easier
 @pytest.fixture(autouse=PY35)
@@ -107,12 +116,7 @@ def _gen_rand():
 # Tests start
 ################################
 
-@pytest.mark.parametrize("ct", [
-    zipfile.ZIP_STORED,
-    zipfile.ZIP_LZMA,
-    zipfile.ZIP_DEFLATED,
-    zipfile.ZIP_BZIP2
-])
+@pytest.mark.parametrize("ct", COMPRESS_TYPES)
 def test_zipstream_compression(caplog, files, ct):
     """Test that all types of compression properly compress and extract"""
     caplog.set_level(logging.WARNING)
@@ -135,12 +139,7 @@ def test_zipstream_compression(caplog, files, ct):
         _verify_zip_contains(zf, f)
 
 
-@pytest.mark.parametrize("ct", [
-    zipfile.ZIP_STORED,
-    zipfile.ZIP_LZMA,
-    zipfile.ZIP_DEFLATED,
-    zipfile.ZIP_BZIP2
-])
+@pytest.mark.parametrize("ct", COMPRESS_TYPES)
 @pytest.mark.parametrize("cl", [None, 2])
 def test_mixed_compression_and_getinfo(ct, cl):
     """Test that files are compressed using the correct method and level and
@@ -159,11 +158,14 @@ def test_mixed_compression_and_getinfo(ct, cl):
     zs.add(b"3c", arcname="3c", compress_type=zipfile.ZIP_DEFLATED, compress_level=TEST_CL)
     zs.add(b"4", arcname="4", compress_type=zipfile.ZIP_BZIP2)
     zs.add(b"4c", arcname="4c", compress_type=zipfile.ZIP_BZIP2, compress_level=TEST_CL)
+    if not PY313:
+        zs.add(b"5", arcname="5", compress_type=zipfile.ZIP_ZSTANDARD)
+        zs.add(b"5c", arcname="5c", compress_type=zipfile.ZIP_ZSTANDARD, compress_level=TEST_CL)
 
     zf = _get_zip(zs)
     zinfos = zf.infolist()
     fullinfos = zs.info_list()
-    assert len(zinfos) == len(fullinfos) == 9
+    assert len(zinfos) == len(fullinfos) == 9 + (0 if PY313 else 2)
 
     def assert_zinfo(idx, name, compress_type, compress_level):
         zi = zinfos[idx]
@@ -189,6 +191,9 @@ def test_mixed_compression_and_getinfo(ct, cl):
     assert_zinfo(6, "3c", zipfile.ZIP_DEFLATED, TEST_CL)
     assert_zinfo(7, "4", zipfile.ZIP_BZIP2, cl)
     assert_zinfo(8, "4c", zipfile.ZIP_BZIP2, TEST_CL)
+    if not PY313:
+        assert_zinfo(9, "5", zipfile.ZIP_ZSTANDARD, cl)
+        assert_zinfo(10, "5c", zipfile.ZIP_ZSTANDARD, TEST_CL)
 
 
 @pytest.mark.parametrize("zip64", [False, True])
@@ -368,6 +373,34 @@ def test_invalid_compression(ct):
             zs.add(".", arcname=".", compress_type=ct)
 
 
+@pytest.mark.skipif(PY313, reason="Tests zstd compress_level (Python 3.14+ only)")
+def test_invalid_zstd_compression():
+    """Test zstd values outside of valid ones cause an error"""
+    ZipStream(compress_type=zipfile.ZIP_ZSTANDARD)
+
+    from compression.zstd import CompressionParameter
+    lower, upper = CompressionParameter.compression_level.bounds()
+
+    for x in (lower, lower+1, 0, upper-1, upper):
+        ZipStream(compress_type=zipfile.ZIP_ZSTANDARD, compress_level=x)
+
+    for x in (lower-1, upper+1):
+        with pytest.raises(ValueError):
+            ZipStream(compress_type=zipfile.ZIP_ZSTANDARD, compress_level=x)
+        with pytest.raises(ValueError):
+            ZipStream().add_path(".", compress_type=zipfile.ZIP_ZSTANDARD, compress_level=x)
+        with pytest.raises(ValueError):
+            ZipStream().add(".", arcname=".", compress_type=zipfile.ZIP_ZSTANDARD, compress_level=x)
+
+        zs = ZipStream(compress_type=zipfile.ZIP_ZSTANDARD)
+        with pytest.raises(ValueError):
+            zs.add(".", arcname=".", compress_level=x)
+
+        zs = ZipStream(compress_level=x)
+        with pytest.raises(ValueError):
+            zs.add(".", arcname=".", compress_type=zipfile.ZIP_ZSTANDARD)
+
+
 def test_multibyte_and_non_ascii_characters_in_filenames():
     zs = ZipStream(sized=True)
     zs.add(None, "☆/")
@@ -475,7 +508,7 @@ def test_creating_dirs_with_data():
 def test_mkdir():
     zs = ZipStream(sized=True)
 
-    with pytest.raises(ValueError, match="A valid arcname .* is required"):
+    with pytest.raises(ValueError, match="A valid arcname for the directory is required"):
         zs.mkdir("")
 
     PATHS = (
@@ -501,20 +534,53 @@ def test_mkdir():
         assert zinfos[i].compress_size == 0
 
 
-def test_directly_adding_empty_dir(tmpdir):
+@pytest.mark.parametrize("arcname", ["/", "//", "///"])
+def test_adding_path_slash_arcname(tmpdir, arcname):
+    te = tmpdir.mkdir("empty")
+    tne = tmpdir.mkdir("not_empty")
+    f = tne.join("file")
+    f.write(b"x")
+
+    def _getinfo(z):
+        data = bytes(z)
+        assert len(data) == len(z)
+        return _get_zip(data).infolist()
+
+    # empty dir - adds nothing
+    zs = ZipStream.from_path(te, arcname=arcname)
+    assert not zs
+    zinfos = _getinfo(zs)
+    assert len(zinfos) == 0
+
+    # adds the file in the dir at the top level
+    zs = ZipStream.from_path(tne, arcname=arcname)
+    assert zs
+    zinfos = _getinfo(zs)
+    assert len(zinfos) == 1
+    assert zinfos[0].filename == "file"
+
+    with pytest.raises(ValueError, match="A valid arcname is required"):
+        ZipStream.from_path(f, arcname=arcname)
+
+
+@pytest.mark.parametrize("arcname", [None, "", ".", "/", "//", "///"])
+def test_directly_adding_empty_dir(tmpdir, arcname):
     """Test adding an empty directory"""
     t = tmpdir.mkdir("empty")
-
-    zs = ZipStream.from_path(t)
+    zs = ZipStream.from_path(t, arcname=arcname)
     data = bytes(zs)
     assert len(data) == len(zs)
 
     zinfos = _get_zip(data).infolist()
-    assert len(zinfos) == 1
-    assert zinfos[0].filename == "empty/"
-    assert zinfos[0].is_dir()
-    assert zinfos[0].file_size == 0
-    assert zinfos[0].compress_size == 0
+    if not arcname or arcname == ".":
+        assert len(zinfos) == 1
+        assert zinfos[0].filename == "{}/".format(arcname or "empty")
+        assert zinfos[0].is_dir()
+        assert zinfos[0].file_size == 0
+        assert zinfos[0].compress_size == 0
+    else:
+        # told to skip the top level with nothing under it - no data
+        assert len(zinfos) == 0
 
 
 def test_add_path_dir_as_file(tmpdir):
@@ -701,12 +767,7 @@ def test_custom_walk(tmpdir):
     [b"a", b"list", b"of", b"bytes"],
     _gen_rand()
 ])
-@pytest.mark.parametrize("ct", [
-    zipfile.ZIP_STORED,
-    zipfile.ZIP_LZMA,
-    zipfile.ZIP_DEFLATED,
-    zipfile.ZIP_BZIP2
-])
+@pytest.mark.parametrize("ct", COMPRESS_TYPES)
 def test_adding_data(caplog, data, ct):
     """Test adding non-files with different compression methods"""
     caplog.set_level(logging.WARNING)
@@ -724,9 +785,9 @@ def test_adding_data(caplog, data, ct):
         data = b"".join(data)
 
     # Test arcname is required
-    with pytest.raises(ValueError, match="A valid arcname .* is required"):
+    with pytest.raises(ValueError, match="A valid arcname is required"):
         zs.add(tostore, None)
-    with pytest.raises(ValueError, match="A valid arcname .* is required"):
+    with pytest.raises(ValueError, match="A valid arcname is required"):
         zs.add(tostore, "")
     with pytest.raises(ValueError, match="Can't store .* as a directory"):
         zs.add(tostore, "directory/")
@@ -844,21 +905,22 @@ def test_adding_empty_name(tmpdir, monkeypatch):
     """Test that when trying to discover an arcname for a path empty names raise an error"""
     monkeypatch.setattr(os.path, "basename", lambda _: "")
     zs = ZipStream(sized=True)
-    with pytest.raises(ValueError, match="No arcname for path"):
-        zs.add_path(tmpdir)
-    with pytest.raises(ValueError, match="No arcname for path"):
-        zs.add_path(tmpdir, arcname="")
+    for recurse in (False, True):
+        with pytest.raises(ValueError, match="No arcname for path .* could be assumed"):
+            zs.add_path(tmpdir, recurse=recurse)
+        with pytest.raises(ValueError, match="No arcname for path .* could be assumed"):
+            zs.add_path(tmpdir, arcname="", recurse=recurse)
 
 
 def test_adding_null_byte_name():
     zs = ZipStream(sized=True)
 
     zs.add(b"data", "file.txt\x00and more")
-    with pytest.raises(ValueError, match="A valid arcname .* is required"):
+    with pytest.raises(ValueError, match="A valid arcname is required"):
         zs.add(b"otherdata", "\x00nofilename")
 
     zs.mkdir("directory\x00and more")
-    with pytest.raises(ValueError, match="A valid arcname .* is required"):
+    with pytest.raises(ValueError, match="A valid arcname for the directory is required"):
         zs.mkdir("\x00nodirectory")
 
     expected_len = len(zs)
@@ -1139,6 +1201,36 @@ def test_invalid_dates(monkeypatch, date):
         assert zinfos[0].date_time == (2107, 12, 31, 23, 59, 58)
 
 
+@pytest.mark.skipif(PY313, reason="Tests zstd compress_level (Python 3.14+ only)")
+def test_zstd_uses_compression_level():
+    """Test that the zstd compression level is applied"""
+    zs = ZipStream(compress_type=zipfile.ZIP_ZSTANDARD)
+    test = b"a"*1024
+    zs.add(test, "-7.txt", compress_level=-7)
+    zs.add(test, "default.txt")
+    zs.add(test, "22.txt", compress_level=22)
+
+    data = bytes(zs)
+    info = list(zs.info_list())
+    assert len(info) == zs.num_streamed() == 3
+
+    for x in info:
+        assert x["size"] == 1024
+        assert x["compress_type"] == zipfile.ZIP_ZSTANDARD
+        assert x["CRC"] == 2085984185
+
+    assert info[0]["name"] == "-7.txt"
+    assert info[1]["name"] == "default.txt"
+    assert info[2]["name"] == "22.txt"
+
+    # check compress level set
+    assert info[0]["compress_level"] == -7
+    assert info[1]["compress_level"] == None
+    assert info[2]["compress_level"] == 22
+
+    # check different compressed sizes for each level (in decreasing order as level increases)
+    assert info[0]["compressed_size"] > info[1]["compressed_size"] > info[2]["compressed_size"]
+
 def test_info_list(monkeypatch):
     faketime = (1980, 1, 1, 0, 0, 0)
 
@@ -1147,12 +1239,13 @@ def test_info_list(monkeypatch):
     monkeypatch.setattr(time, "localtime", fakelocaltime)
 
     data = bytearray()
-    zs = ZipStream(compress_type=zipfile.ZIP_STORED)
-    zs.add(None, "empty/", compress_type=zipfile.ZIP_DEFLATED)
+    zs = ZipStream(compress_type=zipfile.ZIP_DEFLATED)
+    zs.add(None, "empty/", compress_type=zipfile.ZIP_LZMA)
     zs.add(b"test", "text.txt", compress_type=zipfile.ZIP_BZIP2, compress_level=5 if not PY36 else None)
-    zs.add(b"test", "text2.txt")
+    zs.add(b"test", "text2.txt", compress_type=zipfile.ZIP_STORED)
+    zs.add(b"test", "text3.txt")
     info = list(zs.info_list())
-    assert len([x for x in info if not x["streamed"]]) == zs.num_queued() == 3
+    assert len([x for x in info if not x["streamed"]]) == zs.num_queued() == 4
     assert len([x for x in info if x["streamed"]]) == zs.num_streamed() == 0
 
     assert info[0] == {
@@ -1162,7 +1255,7 @@ def test_info_list(monkeypatch):
         "datetime": None,
         "is_dir": True,
         "CRC": None,
-        "compress_type": zipfile.ZIP_DEFLATED,
+        "compress_type": zipfile.ZIP_STORED,  # directories always stored
         "compress_level": None,
         "streamed": False,
     }
@@ -1188,14 +1281,25 @@ def test_info_list(monkeypatch):
         "compress_level": None,
         "streamed": False,
     }
+    assert info[3] == {
+        "name": "text3.txt",
+        "size": 4,
+        "compressed_size": None,
+        "datetime": None,
+        "is_dir": False,
+        "CRC": None,
+        "compress_type": zipfile.ZIP_DEFLATED,
+        "compress_level": None,
+        "streamed": False,
+    }
 
     data += b"".join(zs.all_files())
     info2 = list(zs.info_list())
     assert len([x for x in info2 if not x["streamed"]]) == zs.num_queued() == 0
-    assert len([x for x in info2 if x["streamed"]]) == zs.num_streamed() == 3
+    assert len([x for x in info2 if x["streamed"]]) == zs.num_streamed() == 4
 
-    # Make sure any information that ws provided up-front hasn't changed
-    # (except for the "streamed" key which mush got False -> True)
+    # Make sure any information that was provided up-front hasn't changed
+    # (except for the "streamed" key which must go False -> True)
     for pre, post in zip(info, info2):
         for k, v in pre.items():
             if k == "streamed":
@@ -1211,7 +1315,7 @@ def test_info_list(monkeypatch):
         "datetime": faketime,
         "is_dir": True,
         "CRC": 0,
-        "compress_type": zipfile.ZIP_DEFLATED,
+        "compress_type": zipfile.ZIP_STORED,  # directories always stored
         "compress_level": None,
         "streamed": True,
     }
@@ -1237,16 +1341,27 @@ def test_info_list(monkeypatch):
         "compress_level": None,
         "streamed": True,
     }
+    assert info2[3] == {
+        "name": "text3.txt",
+        "size": 4,
+        "compressed_size": 6,
+        "datetime": faketime,
+        "is_dir": False,
+        "CRC": 3632233996,
+        "compress_type": zipfile.ZIP_DEFLATED,
+        "compress_level": None,
+        "streamed": True,
+    }
 
     zs.add(json.dumps(info2, indent=2), "manifest.json")
 
     assert zs.num_queued() == 1
     data += bytes(zs)
     assert zs.num_queued() == 0
-    assert len(zs.info_list()) == 4
+    assert len(zs.info_list()) == 5
 
     zinfos = _get_zip(data).infolist()
-    assert len(zinfos) == 4
+    assert len(zinfos) == 5
 
 
 def test_get_info(monkeypatch):
@@ -1258,18 +1373,19 @@ def test_get_info(monkeypatch):
     monkeypatch.setattr(time, "localtime", fakelocaltime)
 
     data = bytearray()
-    zs = ZipStream(compress_type=zipfile.ZIP_STORED)
-    zs.add(None, "empty/", compress_type=zipfile.ZIP_DEFLATED)
+    zs = ZipStream(compress_type=zipfile.ZIP_DEFLATED)
+    zs.add(None, "empty/", compress_type=zipfile.ZIP_LZMA)
     zs.add(b"test", "text.txt", compress_type=zipfile.ZIP_BZIP2, compress_level=5 if not PY36 else None)
-    zs.add(b"test", "text2.txt")
-    assert zs.num_queued() == 3
+    zs.add(b"test", "text2.txt", compress_type=zipfile.ZIP_STORED)
+    zs.add(b"test", "text3.txt")
+    assert zs.num_queued() == 4
     with pytest.warns(DeprecationWarning, match="ZipStream.info_list"):
         assert len(zs.get_info()) == 0
     data += b"".join(zs.all_files())
     assert zs.num_queued() == 0
     with pytest.warns(DeprecationWarning, match="ZipStream.info_list"):
         info = zs.get_info()
-    assert len(info) == 3
+    assert len(info) == 4
 
     assert info[0] == {
         "name": "empty/",
@@ -1277,7 +1393,7 @@ def test_get_info(monkeypatch):
         "compressed_size": 0,
         "datetime": "1980-01-01T00:00:00",
         "CRC": 0,
-        "compress_type": zipfile.ZIP_DEFLATED,
+        "compress_type": zipfile.ZIP_STORED,  # directories always stored
         "compress_level": None,
         "extract_version": zipfile.DEFAULT_VERSION
     }
@@ -1301,16 +1417,26 @@ def test_get_info(monkeypatch):
         "compress_level": None,
         "extract_version": zipfile.DEFAULT_VERSION
     }
+    assert info[3] == {
+        "name": "text3.txt",
+        "size": 4,
+        "compressed_size": 6,
+        "datetime": "1980-01-01T00:00:00",
+        "CRC": 3632233996,
+        "compress_type": zipfile.ZIP_DEFLATED,
+        "compress_level": None,
+        "extract_version": zipfile.DEFAULT_VERSION
+    }
 
     zs.add(json.dumps(info, indent=2), "manifest.json")
     assert zs.num_queued() == 1
     data += bytes(zs)
     assert zs.num_queued() == 0
     with pytest.warns(DeprecationWarning, match="ZipStream.info_list"):
-        assert len(zs.get_info()) == 4
+        assert len(zs.get_info()) == 5
 
     zinfos = _get_zip(data).infolist()
-    assert len(zinfos) == 4
+    assert len(zinfos) == 5
 
 
 @pytest.mark.skipif(PY35, reason="Requires zipfiles to support unseekable streams (Python 3.6+ only)")
@@ -1491,6 +1617,9 @@ def test_sized_zipstream(monkeypatch, files, zip64):
         ZipStream(sized=True, compress_type=zipfile.ZIP_LZMA)
     with pytest.raises(ValueError):
         ZipStream(sized=True, compress_type=zipfile.ZIP_BZIP2)
+    if not PY313:
+        with pytest.raises(ValueError):
+            ZipStream(sized=True, compress_type=zipfile.ZIP_ZSTANDARD)
 
     with pytest.raises(ValueError):
         ZipStream.from_path(".", sized=True, compress_type=zipfile.ZIP_DEFLATED)
@@ -1512,6 +1641,9 @@ def test_sized_zipstream(monkeypatch, files, zip64):
         szs.add("invalid", "invalid", compress_type=zipfile.ZIP_LZMA)
     with pytest.raises(ValueError):
         szs.add("invalid", "invalid", compress_type=zipfile.ZIP_BZIP2)
+    if not PY313:
+        with pytest.raises(ValueError):
+            szs.add("invalid", "invalid", compress_type=zipfile.ZIP_ZSTANDARD)
 
     assert szs.sized
     calculated = len(szs)

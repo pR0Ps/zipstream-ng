@@ -33,6 +33,16 @@ from zipfile import (
 )
 
 
+# Constants for compatibility modes
+PY313_COMPAT = sys.version_info < (3, 14)  # disable zstd
+PY36_COMPAT = sys.version_info < (3, 7)  # disable compress_level
+PY35_COMPAT = sys.version_info < (3, 6)  # backport ZipInfo functions, stringify path-like objects
+
+# Bit flags for file entries
+_FLAG_LZMA_EOS_MARKER = 1 << 1
+_FLAG_DATA_DESCRIPTOR = 1 << 3
+_FLAG_IS_DIRECTORY = 1 << 4
+
 # Size of chunks to read out of files
 # Note that when compressing data the compressor will operate on bigger chunks
 # than this - it keeps a cache as new chunks are fed to it.
@@ -51,16 +61,22 @@ ZIP64_ESTIMATE_FACTOR = 1.05
 # (includes "/" regardless of platform as per ZIP format specification)
 PATH_SEPARATORS = set(x for x in (os.sep, os.altsep, "/") if x)
 
-# Constants for compatibility modes
-PY36_COMPAT = sys.version_info < (3, 7)  # disable compress_level
-PY35_COMPAT = sys.version_info < (3, 6)  # backport ZipInfo functions, stringify path-like objects
+# zstd-related constants
+if not PY313_COMPAT:
+    from zipfile import ZIP_ZSTANDARD, ZSTANDARD_VERSION
+    from compression.zstd import CompressionParameter
+    ZSTD_LEVEL_BOUNDS = CompressionParameter.compression_level.bounds()
 
 
 __all__ = [
     # Defined classes
     "ZipStream", "ZipStreamInfo",
     # Compression constants (imported from zipfile)
-    "ZIP_STORED", "ZIP_DEFLATED", "BZIP2_VERSION", "ZIP_BZIP2", "LZMA_VERSION", "ZIP_LZMA",
+    "ZIP_STORED",
+    "ZIP_DEFLATED",
+    "ZIP_BZIP2", "BZIP2_VERSION",
+    "ZIP_LZMA", "LZMA_VERSION",
+    *(["ZIP_ZSTANDARD", "ZSTANDARD_VERSION"] if not PY313_COMPAT else []),
     # Helper functions
     "walk"
 ]
@@ -83,14 +99,34 @@ def _check_compression(compress_type, compress_level):
         __log__.warning(
             "compress_level has no effect when using ZIP_STORED/ZIP_LZMA"
         )
-    elif compress_type == ZIP_DEFLATED and not 0 <= compress_level <= 9:
-        raise ValueError(
-            "compress_level must be between 0 and 9 when using ZIP_DEFLATED"
-        )
-    elif compress_type == ZIP_BZIP2 and not 1 <= compress_level <= 9:
-        raise ValueError(
-            "compress_level must be between 1 and 9 when using ZIP_BZIP2"
-        )
+    elif compress_type == ZIP_DEFLATED:
+        if not 0 <= compress_level <= 9:
+            raise ValueError(
+                "compress_level must be between 0 and 9 when using ZIP_DEFLATED"
+            )
+    elif compress_type == ZIP_BZIP2:
+        if not 1 <= compress_level <= 9:
+            raise ValueError(
+                "compress_level must be between 1 and 9 when using ZIP_BZIP2"
+            )
+    elif not PY313_COMPAT and compress_type == ZIP_ZSTANDARD:
+        if not ZSTD_LEVEL_BOUNDS[0] <= compress_level <= ZSTD_LEVEL_BOUNDS[1]:
+            raise ValueError(
+                "compress_level must be between {} and {} when using ZIP_ZSTANDARD".format(
+                    *ZSTD_LEVEL_BOUNDS
+                )
+            )
+
+
+def _min_version_for_compress_type(compress_type, min_version=0):
+    """Ensure the compress_type is supported by the min_version"""
+    if compress_type == ZIP_BZIP2:
+        min_version = max(BZIP2_VERSION, min_version)
+    elif compress_type == ZIP_LZMA:
+        min_version = max(LZMA_VERSION, min_version)
+    elif not PY313_COMPAT and compress_type == ZIP_ZSTANDARD:
+        min_version = max(ZSTANDARD_VERSION, min_version)
+    return min_version
 
 
 def _timestamp_to_dos(ts):
@@ -151,7 +187,7 @@ class ZipStreamInfo(ZipInfo):
         #   sizes as 0 to defer to the data descriptor.
 
         dosdate, dostime = _timestamp_to_dos(self.date_time)
-        if self.flag_bits & 0x08:
+        if self.flag_bits & _FLAG_DATA_DESCRIPTOR:
             # Using a data descriptor record to record the file sizes, set
             # everything to 0 since they'll be written there instead.
             CRC = compress_size = file_size = 0
@@ -175,11 +211,7 @@ class ZipStreamInfo(ZipInfo):
             file_size = 0xFFFFFFFF
             compress_size = 0xFFFFFFFF
 
-        if self.compress_type == ZIP_BZIP2:
-            min_version = max(BZIP2_VERSION, min_version)
-        elif self.compress_type == ZIP_LZMA:
-            min_version = max(LZMA_VERSION, min_version)
-
+        min_version = _min_version_for_compress_type(self.compress_type, min_version)
         self.extract_version = max(min_version, self.extract_version)
         self.create_version = max(min_version, self.create_version)
         filename, flag_bits = self._encodeFilenameFlags()
@@ -211,14 +243,14 @@ class ZipStreamInfo(ZipInfo):
 
         if self.compress_type == ZIP_LZMA:
             # Compressed LZMA data includes an end-of-stream (EOS) marker
-            self.flag_bits |= 0x02
+            self.flag_bits |= _FLAG_LZMA_EOS_MARKER
 
         # Adding a folder - just need the header without any data or a data descriptor
         if self.is_dir():
             self.CRC = 0
             self.compress_size = 0
             self.file_size = 0
-            self.flag_bits &= ~0x08  # Unset the data descriptor flag
+            self.flag_bits &= ~_FLAG_DATA_DESCRIPTOR
             yield self.FileHeader(zip64=False)
             return
 
@@ -227,7 +259,7 @@ class ZipStreamInfo(ZipInfo):
 
         # Set the data descriptor flag so the filesizes and CRC can be added
         # after the file data
-        self.flag_bits |= 0x08
+        self.flag_bits |= _FLAG_DATA_DESCRIPTOR
 
         # Compressed size can be larger than uncompressed size - overestimate a bit
         zip64 = force_zip64 or self.file_size * ZIP64_ESTIMATE_FACTOR > ZIP64_LIMIT
@@ -313,11 +345,7 @@ class ZipStreamInfo(ZipInfo):
             ) + extra_data
             min_version = ZIP64_VERSION
 
-        if self.compress_type == ZIP_BZIP2:
-            min_version = max(BZIP2_VERSION, min_version)
-        elif self.compress_type == ZIP_LZMA:
-            min_version = max(LZMA_VERSION, min_version)
-
+        min_version = _min_version_for_compress_type(self.compress_type, min_version)
         extract_version = max(min_version, self.extract_version)
         create_version = max(min_version, self.create_version)
         filename, flag_bits = self._encodeFilenameFlags()
@@ -338,7 +366,7 @@ class ZipStreamInfo(ZipInfo):
             len(filename),
             len(extra_data),
             len(self.comment),
-            0,
+            0,  # disk number this file begins on
             self.internal_attr,
             self.external_attr,
             header_offset
@@ -372,7 +400,7 @@ class ZipStreamInfo(ZipInfo):
             zinfo.external_attr = (st.st_mode & 0xFFFF) << 16  # Unix attributes
             if isdir:
                 zinfo.file_size = 0
-                zinfo.external_attr |= 0x10  # MS-DOS directory flag
+                zinfo.external_attr |= _FLAG_IS_DIRECTORY
             else:
                 zinfo.file_size = st.st_size
 
@@ -420,25 +448,20 @@ def _validate_compression(func):
 def _sanitize_arcname(arcname):
     """Terminate the arcname at the first null byte"""
     # based on zipfile._sanitize_filename
-
-    if arcname:
-        # trim the arcname to the first null byte
-        null_byte = arcname.find(chr(0))
-        if null_byte >= 0:
-            arcname = arcname[:null_byte]
-
     if not arcname:
-        raise ValueError(
-            "A valid arcname (name of the entry in the zip file) is required"
-        )
+        return ""
+
+    # trim the arcname to the first null byte
+    null_byte = arcname.find(chr(0))
+    if null_byte >= 0:
+        arcname = arcname[:null_byte]
 
     # Ensure paths in the zip always use forward slashes as the directory
-    # separator
+    # separator and strip any leading ones
     for sep in PATH_SEPARATORS:
         if sep != "/":
             arcname = arcname.replace(sep, "/")
-
-    return arcname
+    return arcname.lstrip("/")
 
 
 def _iter_file(path):
@@ -505,19 +528,24 @@ class ZipStream:
 
         compress_type:
             The ZIP compression method to use when writing the archive, and
-            should be ZIP_STORED, ZIP_DEFLATED, ZIP_BZIP2 or ZIP_LZMA;
-            unrecognized values will cause NotImplementedError to be raised. If
-            ZIP_DEFLATED, ZIP_BZIP2 or ZIP_LZMA is specified but the
-            corresponding module (zlib, bz2 or lzma) is not available,
-            RuntimeError is raised. The default is ZIP_STORED.
+            should be ZIP_STORED, ZIP_DEFLATED, ZIP_BZIP2, ZIP_LZMA, or
+            ZIP_ZSTANDARD (Python 3.14+); unrecognized values will cause
+            NotImplementedError to be raised.
+            If ZIP_DEFLATED, ZIP_BZIP2, ZIP_LZMA, or ZIP_ZSTANDARD is specified
+            but the corresponding module (zlib, bz2, lzma, or compression.zstd)
+            is not available, RuntimeError is raised. The default is ZIP_STORED.
 
         compress_level:
             Controls the compression level to use when writing files to the
-            archive. When using ZIP_STORED or ZIP_LZMA it has no effect. When
-            using ZIP_DEFLATED integers 0 through 9 are accepted (see zlib for
-            more information). When using ZIP_BZIP2 integers 1 through 9 are
-            accepted (see bz2 for more information). Raises a ValueError if the
-            provided value isn't valid for the `compress_type`.
+            archive. When using ZIP_STORED or ZIP_LZMA it has no effect.
+            When using ZIP_DEFLATED integers 0 through 9 are accepted (see zlib
+            for more information).
+            When using ZIP_BZIP2 integers 1 through 9 are accepted (see bz2 for
+            more information).
+            When using ZIP_ZSTANDARD integers -7 though 22 are common (see
+            compression.zstd.CompressionParameter for more information).
+            Raises a ValueError if the provided value isn't valid for the
+            `compress_type`.
 
             Only available in Python 3.7+ (raises a ValueError if used on a
             lower version)
@@ -652,11 +680,14 @@ class ZipStream:
         """Queue up a path to be added to the ZipStream
 
         Queues the `path` up to to be written to the archive, giving it the
-        name provided by `arcname`. If `arcname` is not provided, it is assumed
-        to be the last component of the `path` (Ex: "/path/to/files/" -->
-        "files").
+        name provided by `arcname`.
+        If `arcname` is not provided/empty, it is assumed to be the last
+        component of the `path` (ex: "/path/to/files/" --> "files",
+        "/path/to/file.ext" --> "file.ext").
+        Using an `arcname` of `"/"` is valid when recursing - it causes all
+        the files under `path` to be added at the top level of the zip.
 
-        if `recurse` is `True` (the default), and the `path` is a directory,
+        If `recurse` is `True` (the default), and the `path` is a directory,
         all contents under the `path` will also be added. By default, this is
         done using the `walk` function in this module, which will preserve
         empty directories as well as follow symlinks to files and folders
@@ -690,12 +721,13 @@ class ZipStream:
 
         # special case - discover the arcname from the path
         if not arcname:
-            arcname = os.path.basename(path)
+            arcname = _sanitize_arcname(os.path.basename(path))
             if not arcname:
                 raise ValueError(
                     "No arcname for path '{}' could be assumed".format(path)
                 )
-        arcname = _sanitize_arcname(arcname)
+        else:
+            arcname = _sanitize_arcname(arcname)
 
         # Not recursing - just add the path
         if not recurse or not os.path.isdir(path):
@@ -712,6 +744,9 @@ class ZipStream:
 
         for filepath in recurse(path):
             filename = os.path.relpath(filepath, path)
+            # skip adding the top-level directory if the sanitized arcname is empty
+            if filename == "." and not arcname:
+                continue
             filearcname = os.path.normpath(os.path.join(arcname, filename))
             self._enqueue(
                 path=filepath,
@@ -753,6 +788,8 @@ class ZipStream:
         Raises a RuntimeError if the ZipStream has already been finalized.
         """
         arcname = _sanitize_arcname(arcname)
+        if not arcname:
+            raise ValueError("A valid arcname is required")
 
         if data is None:
             data = b""
@@ -794,6 +831,8 @@ class ZipStream:
     def mkdir(self, arcname):
         """Create a directory inside the ZipStream"""
         arcname = _sanitize_arcname(arcname)
+        if not arcname:
+            raise ValueError("A valid arcname for the directory is required")
 
         if arcname[-1] != "/":
             arcname += "/"
@@ -965,6 +1004,8 @@ class ZipStream:
 
     def _enqueue(self, **kwargs):
         """Internal method to enqueue files, data, and iterables to be streamed"""
+        if not kwargs["arcname"].rstrip("/"):
+            raise ValueError("A valid arcname is required")
 
         path = kwargs.get("path")
         data = kwargs.get("data")
@@ -1023,6 +1064,10 @@ class ZipStream:
         if kwargs.get("compress_level") in (None, self._compress_level):
             kwargs.pop("compress_level", None)
 
+        # directories are always stored
+        if kwargs["arcname"][-1] == "/":
+            kwargs["compress_type"] = ZIP_STORED
+
         self._queue.append(kwargs)
 
     def _track(self, data):
@@ -1042,7 +1087,7 @@ class ZipStream:
             # Set the external attributes in the same way as ZipFile.writestr
             if zinfo.is_dir():
                 zinfo.external_attr = 0o40775 << 16  # drwxrwxr-x
-                zinfo.external_attr |= 0x10  # MS-DOS directory flag
+                zinfo.external_attr |= _FLAG_IS_DIRECTORY
             else:
                 zinfo.external_attr = 0o600 << 16  # ?rw-------
 
@@ -1121,22 +1166,27 @@ class ZipStream:
             centDirOffset > ZIP64_LIMIT or
             centDirSize > ZIP64_LIMIT
         ):
-            # Need to write the Zip64 end-of-archive records
+            # Need to also write a Zip64 end-of-archive record
             zip64EndRec = struct.pack(
                 structEndArchive64,
                 stringEndArchive64,
-                44, 45, 45, 0, 0,
+                44,  # size of this record after this point
+                     # (note: no "zip extensible data" is added so this is a constant)
+                ZIP64_VERSION,  # version made by
+                ZIP64_VERSION,  # version needed to extract
+                0,  # disk number this record is on
+                0,  # disk number that contains the start of the central directory
                 centDirCount,
                 centDirCount,
                 centDirSize,
-                centDirOffset
+                centDirOffset,
             )
             zip64LocRec = struct.pack(
                 structEndArchive64Locator,
                 stringEndArchive64Locator,
-                0,
+                0,  # disk number where the zip64EndRec starts
                 zip64EndRecStart,
-                1
+                1,  # total number of disks
             )
             yield self._track(zip64EndRec + zip64LocRec)
 
@@ -1147,7 +1197,8 @@ class ZipStream:
         endRec = struct.pack(
             structEndArchive,
             stringEndArchive,
-            0, 0,
+            0,  # disk number this record is on
+            0,  # disk number that contains the start of the central directory
             centDirCount,
             centDirCount,
             centDirSize,
@@ -1227,6 +1278,8 @@ if not PY36_COMPAT:
 
     __all__ += ["AsyncZipStream"]
 
+    import queue
+    from typing import AsyncIterable, Iterable
     import asyncio
     try:
         from asyncio import to_thread
@@ -1275,6 +1328,38 @@ if not PY36_COMPAT:
             return cls
         return cls_builder
 
+    def _queue_from_async_iterable(
+        async_iterable: AsyncIterable[bytes],
+        maxsize: int = 0,
+    ) -> queue.Queue[bytes]:
+        """
+        Return a thread‑safe ``queue.Queue`` that will be filled with the
+        ``bytes`` yielded by *async_iterable*.
+
+        The filling is performed by a background ``asyncio.Task`` that runs
+        in the current event‑loop.  The caller (the ZipStream thread) can
+        read from the queue synchronously – ``queue.get()`` blocks until a
+        chunk is available or the iterable is exhausted.
+        """
+
+
+        q: queue.Queue[bytes] = queue.Queue(maxsize=maxsize)
+
+        async def _producer():
+            try:
+                async for chunk in async_iterable:
+                    # ``None`` is used as the sentinel that marks EOF.
+                    q.put(chunk)
+            finally:
+                q.put(None)  # signal that the async iterable is finished
+
+        # Schedule the producer in the *current* event loop.
+        # ``asyncio.create_task`` returns immediately; the task runs
+        # concurrently with everything else.
+        asyncio.create_task(_producer())
+        return q
+
+
 
     @_delegate("__len__", "__bool__", "__bytes__", "is_empty", "num_queued", "num_streamed", "mkdir", "info_list")
     @_delegate_property("sized", "last_modified", "comment")
@@ -1317,5 +1402,40 @@ if not PY36_COMPAT:
             return await to_thread(self._zip.add_path, *args, **kwargs)
 
         @functools.wraps(ZipStream.add)
-        async def add(self, data, *args, **kwargs):
-            return await to_thread(self._zip.add, data, *args, **kwargs)
+        async def add(
+            self,
+            data: AsyncIterable[bytes],
+            *args,
+            **kwargs,
+        ) -> None:
+            """
+            Add *data* to the zip archive where *data* is an asynchronous
+            iterable of ``bytes`` (e.g. an async generator that yields HTTP
+            chunks).
+
+            The method works by:
+
+            1. Creating a thread‑safe ``queue.Queue`` that is filled by a
+            background ``asyncio`` task running in the current event loop.
+            2. Passing a synchronous generator that reads from that queue
+            to the underlying ``ZipStream.add`` method (which runs in a
+            thread via ``to_thread``).
+
+            This keeps the event‑loop non‑blocking while the zip compression
+            happens in a separate thread.
+            """
+            # Turn the async iterable into a queue that the thread can read.
+            q = _queue_from_async_iterable(data)
+
+            # Build a *synchronous* generator that yields from the queue.
+            def sync_gen() -> Iterable[bytes]:
+                while True:
+                    chunk = q.get()  # blocks until a chunk is available
+                    if chunk is None:  # sentinel → end of stream
+                        break
+                    yield chunk
+
+            # Delegate to the original (thread‑based) ``add`` implementation.
+            # ``to_thread`` runs the whole call in a worker thread, so the
+            # zip compression stays off the event loop.
+            await to_thread(self._zip.add, sync_gen(), *args, **kwargs)
