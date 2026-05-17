@@ -3,6 +3,7 @@ zipstream-ng changelog
 
 ### [v1.9.1]
 - Declare support for Python 3.15
+- Always report using ZIP_STORED for directories since they're never compressed
 - Improve build and packaging system
 
 ### [v1.9.0]
@@ -109,4 +110,4 @@ zipstream-ng changelog
  [v1.7.1]: https://github.com/pR0Ps/zipstream-ng/compare/v1.7.0...v1.7.1
  [v1.8.0]: https://github.com/pR0Ps/zipstream-ng/compare/v1.7.1...v1.8.0
  [v1.9.0]: https://github.com/pR0Ps/zipstream-ng/compare/v1.8.0...v1.9.0
- [v1.9.0]: https://github.com/pR0Ps/zipstream-ng/compare/v1.9.0...v1.9.1
+ [v1.9.1]: https://github.com/pR0Ps/zipstream-ng/compare/v1.9.0...v1.9.1
