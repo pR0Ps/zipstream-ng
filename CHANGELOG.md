@@ -1,6 +1,10 @@
 zipstream-ng changelog
 ======================
 
+### [v1.9.1]
+- Declare support for Python 3.15
+- Improve build and packaging system
+
 ### [v1.9.0]
 - Add support for Zstandard compression where available (Python 3.14+)
 
@@ -105,3 +109,4 @@ zipstream-ng changelog
  [v1.7.1]: https://github.com/pR0Ps/zipstream-ng/compare/v1.7.0...v1.7.1
  [v1.8.0]: https://github.com/pR0Ps/zipstream-ng/compare/v1.7.1...v1.8.0
  [v1.9.0]: https://github.com/pR0Ps/zipstream-ng/compare/v1.8.0...v1.9.0
+ [v1.9.0]: https://github.com/pR0Ps/zipstream-ng/compare/v1.9.0...v1.9.1
