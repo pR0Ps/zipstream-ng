@@ -1,6 +1,10 @@
 zipstream-ng changelog
 ======================
 
+### [v1.9.2]
+- Restore `zipserver` command that was missed during build modernization
+- Fix tests not being included in the sdist package
+
 ### [v1.9.1]
 - Declare support for Python 3.15
 - Always report using ZIP_STORED for directories since they're never compressed
@@ -111,3 +115,4 @@ zipstream-ng changelog
  [v1.8.0]: https://github.com/pR0Ps/zipstream-ng/compare/v1.7.1...v1.8.0
  [v1.9.0]: https://github.com/pR0Ps/zipstream-ng/compare/v1.8.0...v1.9.0
  [v1.9.1]: https://github.com/pR0Ps/zipstream-ng/compare/v1.9.0...v1.9.1
+ [v1.9.2]: https://github.com/pR0Ps/zipstream-ng/compare/v1.9.1...v1.9.2
