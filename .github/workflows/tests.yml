@@ -68,8 +68,9 @@ jobs:
         path: dist
 
     - name: Install from wheel
+      shell: bash
       run: |
-        pip install --no-index --find-links dist zipstream-ng
+        pip install dist/*.whl
 
     - name: Install pytest and run tests
       run: |
