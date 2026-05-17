@@ -24,11 +24,10 @@ classifiers = [
 ]
 requires-python = ">=3.5"
 dependencies = []
+scripts.zipserver = "zipstream.server:main"
 
 [dependency-groups]
 test = ["pytest", "pytest-cov"]
-
-scripts.zipserver = "zipstream.server:main"
 
 [build-system]
 requires = ["hatchling"]
