@@ -461,10 +461,10 @@ def test_external_attrs(tmpdir):
     zs.add(b"", "file-fromadd")
 
     # Test values:
-    # 0x10          = MS-DOS directory flag
-    # 0o40000 << 16 = d---------
-    # 0o40775 << 16 = drwxrwxr-x
-    # 0o600 << 16   = ?rw-------
+    # 0x10           = MS-DOS directory flag
+    # 0o40000 << 16  = d---------
+    # 0o40775 << 16  = drwxrwxr-x
+    # 0o100600 << 16 = -rw-------
 
     zinfos = _get_zip(zs).infolist()
     assert len(zinfos) == 4
@@ -487,7 +487,7 @@ def test_external_attrs(tmpdir):
     assert not zinfos[3].is_dir()
     assert not zinfos[3].external_attr & 0x10
     assert not zinfos[3].external_attr & 0o40000 << 16
-    assert zinfos[3].external_attr & 0o600 << 16
+    assert zinfos[3].external_attr & 0o100600 << 16
 
 
 def test_creating_dirs_with_data():

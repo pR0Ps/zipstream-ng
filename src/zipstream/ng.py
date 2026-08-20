@@ -1102,7 +1102,7 @@ class ZipStream:
                 zinfo.external_attr = 0o40775 << 16  # drwxrwxr-x
                 zinfo.external_attr |= _FLAG_IS_DIRECTORY
             else:
-                zinfo.external_attr = 0o600 << 16  # ?rw-------
+                zinfo.external_attr = 0o100600 << 16  # -rw-------
 
             if data is not None:
                 zinfo.file_size = len(data)
