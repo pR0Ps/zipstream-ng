@@ -42,6 +42,7 @@ PY35_COMPAT = sys.version_info < (3, 6)  # backport ZipInfo functions, stringify
 _FLAG_LZMA_EOS_MARKER = 1 << 1
 _FLAG_DATA_DESCRIPTOR = 1 << 3
 _FLAG_IS_DIRECTORY = 1 << 4
+_FLAG_UTF8_FILENAME = 1 << 11
 
 # Size of chunks to read out of files
 # Note that when compressing data the compressor will operate on bigger chunks
@@ -153,6 +154,18 @@ class ZipStreamInfo(ZipInfo):
             date_time = min(max(MIN_DATE, date_time), MAX_DATE)
 
         super().__init__(filename, date_time)
+
+    # Overwrite ZipInfo._encodeFilenameFlags to only use ascii/utf-8.
+    # As of python/cpython#150091 Python will attempt to encode the filename
+    # using cp437 instead of ascii to support modifying zips that used cp437
+    # (valid according to the spec). However, since we're creating a new zip, we
+    # restrict entries without the utf-8 flag to ascii instead since it's less
+    # likely to be misinterpreted by unarchivers.
+    def _encodeFilenameFlags(self):
+        try:
+            return self.filename.encode("ascii"), self.flag_bits & ~_FLAG_UTF8_FILENAME
+        except UnicodeEncodeError:
+            return self.filename.encode("utf-8"), self.flag_bits | _FLAG_UTF8_FILENAME
 
     def DataDescriptor(self, zip64):
         """Return the data descriptor for the file entry"""

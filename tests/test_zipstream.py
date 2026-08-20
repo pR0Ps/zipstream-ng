@@ -406,18 +406,21 @@ def test_multibyte_and_non_ascii_characters_in_filenames():
     zs.add(None, "☆/")
     zs.add(b"some data", "Здравствуйте")
     zs.add(b"", "你好")
+    zs.add(b"", "ääääääääää")  # valid cp437 but invalid ascii
 
     data = bytes(zs)
     assert len(data) == len(zs)
 
     zinfos = _get_zip(data).infolist()
-    assert len(zinfos) == 3
+    assert len(zinfos) == 4
     assert zinfos[0].filename == "☆/"
     assert zinfos[0].is_dir()
     assert zinfos[1].filename == "Здравствуйте"
     assert not zinfos[1].is_dir()
     assert zinfos[2].filename == "你好"
     assert not zinfos[2].is_dir()
+    assert zinfos[3].filename == "ääääääääää"
+    assert not zinfos[3].is_dir()
 
 
 def test_adding_windows_paths(monkeypatch):
