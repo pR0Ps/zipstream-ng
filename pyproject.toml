@@ -1,6 +1,6 @@
 [project]
 name = "zipstream-ng"
-version = "1.9.2"
+version = "1.9.3"
 description = "A modern and easy to use streamable zip file generator"
 urls.Repository = "https://github.com/pR0Ps/zipstream-ng"
 urls.Changelog = "https://github.com/pR0Ps/zipstream-ng/blob/master/CHANGELOG.md"

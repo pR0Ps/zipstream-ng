@@ -1,6 +1,9 @@
 zipstream-ng changelog
 ======================
 
+### [v1.9.3]
+- Fix length calculation when adding extended ascii filenames (only affects Python 3.13.14+, 3.14.6+, 3.15+)
+
 ### [v1.9.2]
 - Restore `zipserver` command that was missed during build modernization
 - Fix tests not being included in the sdist package
@@ -116,3 +119,4 @@ zipstream-ng changelog
  [v1.9.0]: https://github.com/pR0Ps/zipstream-ng/compare/v1.8.0...v1.9.0
  [v1.9.1]: https://github.com/pR0Ps/zipstream-ng/compare/v1.9.0...v1.9.1
  [v1.9.2]: https://github.com/pR0Ps/zipstream-ng/compare/v1.9.1...v1.9.2
+ [v1.9.3]: https://github.com/pR0Ps/zipstream-ng/compare/v1.9.2...v1.9.3
