@@ -1661,6 +1661,25 @@ def test_sized_zipstream(monkeypatch, files, zip64):
     assert len(zf.infolist()) == len(files) + 4
 
 
+@pytest.mark.parametrize("num_files", [2, 3, 4])
+def test_sized_zipstream_file_count_limit(monkeypatch, num_files):
+    """Test the calculated size below, at, and above the Zip64 file count limit"""
+    monkeypatch.setattr(zipstream.ng, "ZIP_FILECOUNT_LIMIT", 3)
+
+    zs = ZipStream(sized=True)
+    for i in range(num_files):
+        zs.add(b"", str(i))
+
+    calculated = len(zs)
+    data = bytes(zs)
+    assert calculated == len(data)
+
+    zf = _get_zip(data)
+    assert len(zf.infolist()) == num_files
+    for i in range(num_files):
+        assert zf.read(str(i)) == b""
+
+
 @pytest.mark.parametrize("zip64", [False, True])
 def test_sized_zipstream_size_while_adding(monkeypatch, files, zip64):
     """Test a sized ZipStream accurately calculates its final size while adding
