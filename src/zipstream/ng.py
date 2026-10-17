@@ -626,7 +626,7 @@ class ZipStream:
         # changes.
         eocd_size = sizeEndCentDir + len(self._comment)  # 22 + comment len
         if (
-            num_files > ZIP_FILECOUNT_LIMIT or
+            num_files >= ZIP_FILECOUNT_LIMIT or
             files_size > ZIP64_LIMIT or
             cdfh_size > ZIP64_LIMIT
         ):
