@@ -611,6 +611,33 @@ def test_add_path_file_as_dir(tmpdir):
     assert len(zs) == len(bytes(zs))
 
 
+@pytest.mark.parametrize("arcname", [
+    "a//b",
+    "a///b",
+    "./a/b",
+    "a/./b",
+    "a/../b",
+])
+def test_arcname_normalized(tmpdir, arcname):
+    """Test that arcnames that require normalization are correctly accounted for in the length"""
+    f = tmpdir.join("file")
+    f.write(b"x")
+    d = tmpdir.mkdir("sub")
+
+    zs = ZipStream(sized=True)
+    zs.add(b"x", arcname=arcname + ".txt")
+    zs.add_path(f, arcname=arcname + ".txt")
+    zs.add_path(d, arcname=arcname + "/", recurse=True)
+    zs.add_path(d, arcname=arcname + "/", recurse=False)
+    zs.mkdir(arcname=arcname + "/")
+    zs.add_path(d, arcname=arcname + "//", recurse=True)
+    zs.add_path(d, arcname=arcname + "//", recurse=False)
+    zs.mkdir(arcname=arcname + "//")
+
+    assert len(zs.info_list()) == 8
+    assert len(zs) == len(bytes(zs))
+
+
 def test_adding_local_dir(tmpdir):
     """Test adding files/folder from the local directory doesn't include the directory name of ."""
     t = tmpdir.mkdir("top")
