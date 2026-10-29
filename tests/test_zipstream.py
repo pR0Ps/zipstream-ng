@@ -1785,3 +1785,31 @@ def test_zip64_real(tmpdir):
 
         with zf.open("small.bin", "r") as fp:
             assert smalldata == fp.read()
+
+
+@pytest.mark.parametrize("data", [[], tuple()])
+@pytest.mark.parametrize("sized", [True, False])
+def test_adding_empty_iterables(data, sized):
+    """Test that empty iterables create valid empty files instead of crashing
+
+    Empty list/tuple iterables are falsy, which used to trip the internal
+    data-presence assert when generating the stream (they were never
+    treated as "no data provided" once accepted by `add`).
+    """
+    zs = ZipStream(sized=sized)
+    zs.add(data, "test")
+    out = b"".join(zs)
+    if sized:
+        assert len(zs) == len(out)
+    zf = zipfile.ZipFile(io.BytesIO(out))
+    assert zf.testzip() is None
+    assert zf.read("test") == b""
+
+
+def test_adding_empty_iterable_with_size():
+    """An empty iterable with an explicit size must produce an empty entry"""
+    zs = ZipStream()
+    zs.add([], "test", size=0)
+    zf = zipfile.ZipFile(io.BytesIO(b"".join(zs)))
+    assert zf.testzip() is None
+    assert zf.read("test") == b""
