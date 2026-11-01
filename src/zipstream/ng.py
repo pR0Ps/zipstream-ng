@@ -154,6 +154,9 @@ class ZipStreamInfo(ZipInfo):
             date_time = min(max(MIN_DATE, date_time), MAX_DATE)
 
         super().__init__(filename, date_time)
+        # Python 3.8's ZipInfo.__init__ doesn't initialize this attribute (it
+        # was added in 3.9+), so set it explicitly. No-op on newer versions.
+        self.file_size = 0
 
     # Overwrite ZipInfo._encodeFilenameFlags to only use ascii/utf-8.
     # As of python/cpython#150091 Python will attempt to encode the filename
