@@ -1,6 +1,9 @@
 zipstream-ng changelog
 ======================
 
+### [Unreleased]
+- Fix adding an empty list or tuple crashing stream generation with an `AssertionError` (falsy iterables were treated as missing data)
+
 ### [v1.9.3]
 - Fix length calculation when adding extended ascii filenames (only affects Python 3.13.14+, 3.14.6+, 3.15+)
 
