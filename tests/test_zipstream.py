@@ -1785,3 +1785,29 @@ def test_zip64_real(tmpdir):
 
         with zf.open("small.bin", "r") as fp:
             assert smalldata == fp.read()
+
+
+@pytest.mark.parametrize("empty_iterable", [[], ()])
+def test_add_empty_falsy_iterable(empty_iterable):
+    """Test adding empty but falsy iterables (list/tuple) - issue #36"""
+    zs = ZipStream()
+    zs.add(empty_iterable, "empty.txt")
+    data = bytes(zs)
+
+    # The entry should be preserved and empty
+    zf = _get_zip(data)
+    assert zf.namelist() == ["empty.txt"]
+    assert zf.read("empty.txt") == b""
+
+
+@pytest.mark.parametrize("empty_iterable", [[], ()])
+def test_add_empty_falsy_iterable_sized(empty_iterable):
+    """Test adding empty but falsy iterables to a sized ZipStream - issue #36"""
+    zs = ZipStream(sized=True)
+    zs.add(empty_iterable, "empty.txt")
+    data = bytes(zs)
+
+    assert len(data) == len(zs)
+    zf = _get_zip(data)
+    assert zf.namelist() == ["empty.txt"]
+    assert zf.read("empty.txt") == b""
