@@ -466,14 +466,24 @@ def _sanitize_arcname(arcname):
 
     # trim the arcname to the first null byte
     null_byte = arcname.find(chr(0))
-    if null_byte >= 0:
+    if null_byte == 0:
+        return ""
+    elif null_byte > 0:
         arcname = arcname[:null_byte]
+
+    # normalize the arcname in the same way that Zipfile.from_file does
+    isdir = arcname[-1] in PATH_SEPARATORS
+    arcname = os.path.normpath(os.path.splitdrive(arcname)[1])
 
     # Ensure paths in the zip always use forward slashes as the directory
     # separator and strip any leading ones
     for sep in PATH_SEPARATORS:
         if sep != "/":
             arcname = arcname.replace(sep, "/")
+
+    arcname = arcname.rstrip("/")
+    if isdir:
+        arcname += "/"
     return arcname.lstrip("/")
 
 
